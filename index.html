@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>X3 图片均分切页工具</title>
+<title>X3 图片两次裁边均分工具</title>
 <style>
 *{box-sizing:border-box}
 body{margin:0;padding:16px;background:#f3f4f6;color:#222;font-family:system-ui,-apple-system,sans-serif}
@@ -31,36 +31,34 @@ hr{border:0;border-top:1px solid #ddd;margin:15px 0}
 </head>
 <body>
 <main>
-<h1>X3 图片均分切页工具</h1>
+<h1>X3 图片两次裁边均分工具</h1>
 <p>
-全新简化版：先裁掉四周白边，再将长图沿上下方向均分为 2 份或 3 份。
-不识别漫画格子、不拼格子，允许相邻页面重复部分画面。
-每份独立适配 X3 的 792 × 528 横屏页面。
+处理顺序：原图裁白边 → 均分 2 份或 3 份 → 每份再次独立裁白边 → 输出 792 × 528 页面。
+不识别漫画格子，不拼接上下画面，允许相邻页面重复部分内容。
 </p>
 
 <section class="card">
 <h3>1. 选择图片</h3>
 <input id="files" type="file" accept="image/*" multiple>
-<p class="small">支持一次选择多张图片，按文件选择顺序处理。</p>
+<p class="small">支持一次选择多张图片，按选择顺序处理。</p>
 </section>
 
 <section class="card">
 <h3>2. 切割设置</h3>
-
 <label>
 切成几份
 <br>
 <select id="parts">
 <option value="2">均分 2 份</option>
-<option value="3">均分 3 份</option>
+<option value="3" selected>均分 3 份</option>
 </select>
 </label>
 
 <label>
-页面重叠量
+相邻页面重叠量
 <br>
 <input id="overlap" type="number" min="0" max="200" step="4" value="24"> 像素
-<p class="small">相邻两份会重复这部分画面。数值越大，越不容易漏掉边界内容。</p>
+<p class="small">切割区域之间保留重叠，降低人物或对白恰好被切断的风险。</p>
 </label>
 
 <label>
@@ -68,18 +66,18 @@ hr{border:0;border-top:1px solid #ddd;margin:15px 0}
 <br>
 <select id="trim">
 <option value="normal">普通：只裁明显白边</option>
-<option value="strong" selected>积极：尽量裁掉边框和边框水印</option>
+<option value="strong" selected>积极：尽量裁掉边框白边</option>
 <option value="off">不裁白边</option>
 </select>
-<p class="small">裁切根据边缘连续的近白区域判断。水印若覆盖整条边缘或颜色很深，无法保证完全去除。</p>
+<p class="small">同一强度用于第一次和第二次裁边。边框水印若占据较大区域或颜色很深，无法保证完全去除。</p>
 </label>
 
 <label>
-页面输出
+页面适配方式
 <br>
 <select id="fit">
 <option value="fit">完整显示，保持比例（推荐）</option>
-<option value="fill">铺满页面，允许裁掉左右少量内容</option>
+<option value="fill">铺满页面，允许裁掉少量边缘</option>
 </select>
 </label>
 
@@ -93,13 +91,13 @@ hr{border:0;border-top:1px solid #ddd;margin:15px 0}
 </section>
 
 <section class="card">
-<h3>4. 原图</h3>
+<h3>4. 原图预览</h3>
 <div id="originals"></div>
 </section>
 
 <section class="card">
 <h3>5. 输出预览</h3>
-<p class="small">每张输出图片都是 792 × 528。可逐页下载，也可以下载全部 PNG。</p>
+<p class="small">每份切割完成后都会再次裁边，再独立缩放到 792 × 528。</p>
 <div id="preview"></div>
 <hr>
 <button id="download" disabled>下载全部 PNG</button>
@@ -161,9 +159,9 @@ function crop(src,x,y,w,h){
 }
 
 /*
- * 沿图片四边扫描近白区域。
- * 使用整行/整列的亮色占比判断，因此少量水印不会阻止裁边。
- * 只在外侧有限区域内裁切，防止误删图片内部大块白色区域。
+ * 裁掉图片四周连续的近白区域。
+ * 普通模式比较保守；积极模式允许整行/列存在少量非白像素，
+ * 因此边框上的小水印不一定会阻止裁边。
  */
 function trimWhiteBorder(src){
   const mode=$("trim").value;
@@ -207,24 +205,17 @@ function trimWhiteBorder(src){
 
   let top=0,bottom=h-1,left=0,right=w-1;
 
-  // 连续扫描四边，遇到不够白的整行/列即停止。
   while(top<maxY&&rowBrightRatio(top)>=ratioThreshold)top++;
   while(bottom>h-1-maxY&&rowBrightRatio(bottom)>=ratioThreshold)bottom--;
   while(left<maxX&&colBrightRatio(left)>=ratioThreshold)left++;
   while(right>w-1-maxX&&colBrightRatio(right)>=ratioThreshold)right--;
 
-  // 防止极端情况裁得过多。
+  // 防止误操作把图裁得过小。
   if(right-left<w*0.45||bottom-top<h*0.45)return src;
 
-  // 避免留下扫描停止位置的白边，向内容方向微调一小段。
   return crop(src,left,top,right-left+1,bottom-top+1);
 }
 
-/*
- * 统一输出 792×528。
- * fit：完整显示。
- * fill：铺满，必要时裁掉少量左右边缘。
- */
 function makePage(src){
   const out=canvas(PAGE_W,PAGE_H);
   const ctx=out.getContext("2d");
@@ -271,6 +262,15 @@ function addOutput(c,name){
   outputs.push({canvas:c,name:name});
 }
 
+function downloadOne(item){
+  const a=document.createElement("a");
+  a.href=item.canvas.toDataURL("image/png");
+  a.download=item.name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
 function render(){
   const root=$("preview");
   root.replaceChildren();
@@ -298,15 +298,6 @@ function render(){
   $("download").disabled=outputs.length===0;
 }
 
-function downloadOne(item){
-  const a=document.createElement("a");
-  a.href=item.canvas.toDataURL("image/png");
-  a.download=item.name;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-}
-
 async function process(){
   if(busy)return;
 
@@ -330,32 +321,36 @@ async function process(){
     for(let fi=0;fi<files.length;fi++){
       const file=files[fi];
 
-      status(
-        "正在处理 "+(fi+1)+"/"+files.length+"："+file.name+
-        "\n已生成 "+pageCount+" 页。"
-      );
+      status("正在处理 "+(fi+1)+"/"+files.length+"："+file.name);
 
       const img=await readImage(file);
       const original=fromImage(img);
       addOriginal(file,original);
 
-      // 第一步：裁除四周白边。
-      const src=trimWhiteBorder(original);
+      // 第一次裁边：处理整张原图。
+      const trimmedOriginal=trimWhiteBorder(original);
 
-      // 第二步：沿纵向均分为 2 份或 3 份。
-      const baseH=src.height/count;
+      const w=trimmedOriginal.width;
+      const h=trimmedOriginal.height;
+      const baseH=h/count;
       const baseName=safeName(file.name);
 
+      // 先均分，再对每一份分别执行第二次裁边。
       for(let i=0;i<count;i++){
-        // 每段上下重叠，避免切割线附近的画面丢失。
         const y0=Math.max(0,Math.floor(i*baseH-overlap/2));
         const y1=Math.min(
-          src.height,
+          h,
           Math.ceil((i+1)*baseH+(i<count-1?overlap/2:0))
         );
 
-        const part=crop(src,0,y0,src.width,y1-y0);
-        const page=makePage(part);
+        // 均分得到的原始片段。
+        const rawPart=crop(trimmedOriginal,0,y0,w,y1-y0);
+
+        // 第二次裁边：每个片段独立重新检测四周白边。
+        const trimmedPart=trimWhiteBorder(rawPart);
+
+        // 最后适配到 X3 横屏尺寸。
+        const page=makePage(trimmedPart);
 
         addOutput(
           page,
@@ -366,9 +361,11 @@ async function process(){
 
       status(
         "已处理 "+(fi+1)+"/"+files.length+"："+file.name+
-        "\n裁边后尺寸："+src.width+" × "+src.height+
-        "\n本图切成 "+count+" 份"+
-        "\n累计生成 "+pageCount+" 页。"
+        "\n原图尺寸："+original.width+" × "+original.height+
+        "\n第一次裁边后："+trimmedOriginal.width+" × "+trimmedOriginal.height+
+        "\n切割份数："+count+
+        "\n每份均已再次独立裁边。"+
+        "\n累计输出："+pageCount+" 页。"
       );
 
       render();
@@ -381,7 +378,7 @@ async function process(){
       "每张切成："+count+" 份\n"+
       "输出页面："+outputs.length+" 页\n"+
       "页面尺寸：792 × 528\n"+
-      "没有进行格子识别或上下拼接。"
+      "处理顺序：第一次裁边 → 均分 → 每份再次裁边 → 输出。"
     );
   }catch(e){
     console.error(e);
@@ -417,10 +414,10 @@ $("download").addEventListener("click",async()=>{
 
   status(
     "已发起全部 "+outputs.length+" 个 PNG 文件的下载。\n"+
-    "若浏览器提示是否允许多个文件下载，请选择允许。"
+    "如果浏览器阻止多个文件下载，请允许此网站下载多个文件。"
   );
   $("download").disabled=false;
-})();
+});
 })();
 </script>
 </body>
