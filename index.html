@@ -76,8 +76,7 @@ hr{border:0;border-top:1px solid #ddd;margin:15px 0}
 页面适配方式
 <br>
 <select id="fit">
-<option value="fit">完整显示，保持比例（推荐）</option>
-<option value="fill">铺满页面，允许裁掉少量边缘</option>
+  <option value="fit" selected>完整显示，不裁切画面</option>
 </select>
 </label>
 
@@ -217,24 +216,36 @@ function trimWhiteBorder(src){
 }
 
 function makePage(src){
-  const out=canvas(PAGE_W,PAGE_H);
-  const ctx=out.getContext("2d");
-  ctx.fillStyle="#fff";
-  ctx.fillRect(0,0,PAGE_W,PAGE_H);
+  const out = canvas(PAGE_W, PAGE_H);
+  const ctx = out.getContext("2d");
 
-  const mode=$("fit").value;
-  const scale=mode==="fill"
-    ?Math.max(PAGE_W/src.width,PAGE_H/src.height)
-    :Math.min(PAGE_W/src.width,PAGE_H/src.height);
+  // 白色背景
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, PAGE_W, PAGE_H);
 
-  const dw=src.width*scale;
-  const dh=src.height*scale;
-  const dx=(PAGE_W-dw)/2;
-  const dy=(PAGE_H-dh)/2;
+  // 四周留出安全边距，防止边缘内容贴边
+  const margin = 8;
+  const availableW = PAGE_W - margin * 2;
+  const availableH = PAGE_H - margin * 2;
 
-  ctx.imageSmoothingEnabled=true;
-  ctx.imageSmoothingQuality="high";
-  ctx.drawImage(src,dx,dy,dw,dh);
+  // 始终按比例缩小，绝不放大裁切
+  const scale = Math.min(
+    availableW / src.width,
+    availableH / src.height,
+    1
+  );
+
+  const dw = src.width * scale;
+  const dh = src.height * scale;
+  const dx = (PAGE_W - dw) / 2;
+  const dy = (PAGE_H - dh) / 2;
+
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+
+  // 整张图完整绘制到画布内
+  ctx.drawImage(src, dx, dy, dw, dh);
+
   return out;
 }
 
