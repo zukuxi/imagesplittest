@@ -4,451 +4,421 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>X3 日漫分格测试工具</title>
+<title>X3 日漫智能分格与排版</title>
 <style>
 *{box-sizing:border-box}
-body{margin:0;background:#f3f5f8;color:#202938;font:15px/1.5 system-ui,sans-serif}
-header{background:#172033;color:white;padding:18px}
-header h1{font-size:21px;margin:0}
-header p{font-size:13px;color:#cbd5e1;margin:5px 0 0}
+body{margin:0;background:#f2f4f8;color:#202938;font:15px/1.5 system-ui,sans-serif}
+header{background:#172033;color:#fff;padding:16px}
+h1{font-size:21px;margin:0}header p{font-size:13px;color:#cbd5e1;margin:4px 0}
 main{max-width:1100px;margin:auto;padding:12px;display:grid;gap:12px}
 .card{background:white;border:1px solid #dce1e9;border-radius:12px;padding:14px}
-h2{font-size:17px;margin:0 0 12px}
+h2{font-size:17px;margin:0 0 10px}
 .row{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
-.field{flex:1;min-width:130px}
-label{display:block;color:#667085;font-size:12px;margin-bottom:4px}
-input,select,button{font:inherit}
-input[type=number],select{width:100%;padding:8px;border:1px solid #ccd3df;border-radius:7px}
-button{border:0;border-radius:8px;padding:9px 13px;background:#245bdb;color:white;cursor:pointer}
+button{border:0;border-radius:8px;padding:9px 13px;background:#245bdb;color:white;font:inherit;cursor:pointer}
 button.secondary{background:#e9edf5;color:#202938}
 button:disabled{opacity:.45}
+input,select{font:inherit;max-width:100%}
+select{padding:7px;border:1px solid #ccd3df;border-radius:7px}
+.check{display:flex;align-items:center;gap:5px;font-size:13px;margin:5px 12px 5px 0}
 .note{font-size:12px;color:#667085}
-#status{font-size:13px;color:#245bdb;margin-top:8px}
-.workspace{display:grid;grid-template-columns:1.2fr .8fr;gap:12px}
-#stage{background:#242833;border-radius:8px;padding:8px;overflow:auto;min-height:180px}
-#stageWrap{position:relative;width:100%;max-width:720px;margin:auto}
-#sourceCanvas{display:block;width:100%;height:auto}
-.cut{position:absolute;left:0;right:0;height:0;border-top:3px solid #f04438;cursor:ns-resize;touch-action:none}
-.cut span{position:absolute;right:0;top:-23px;background:#f04438;color:white;padding:1px 6px;font-size:12px}
+#status{color:#245bdb;font-size:13px;margin-top:8px}
+.workspace{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+#stage{background:#252a35;padding:8px;border-radius:8px;overflow:auto}
+#source{display:block;width:100%;height:auto}
 #results{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
-.result{border:1px solid #dce1e9;padding:8px;border-radius:9px;min-width:0}
-.result canvas{width:100%;height:auto;display:block;background:#242833}
-.result h3{font-size:13px;overflow-wrap:anywhere}
-.check{display:flex;align-items:center;gap:5px;margin:5px 0}
-.check label{margin:0;color:#202938;font-size:13px}
-@media(max-width:720px){.workspace{grid-template-columns:1fr}main{padding:8px}.card{padding:10px}}
+.result{border:1px solid #ddd;padding:8px;border-radius:8px;min-width:0}
+.result canvas{width:100%;height:auto;background:#eee}
+.result h3{font-size:12px;overflow-wrap:anywhere}
+@media(max-width:700px){.workspace{grid-template-columns:1fr}main{padding:8px}}
 </style>
 </head>
 <body>
 <header>
-<h1>X3 日漫分格测试工具</h1>
-<p>本地处理 · 横屏输出 792 × 528 · 不上传漫画</p>
+<h1>X3 日漫智能分格与排版</h1>
+<p>优先适配 792×528 横屏 · 本地处理 · 图片不会上传</p>
 </header>
 <main>
 <section class="card">
-<h2>1. 选择图片</h2>
+<h2>1. 选择漫画图片</h2>
 <div class="row">
 <input id="file" type="file" accept="image/*">
-<button class="secondary" id="preprocess" disabled>重新预处理</button>
-<button class="secondary" id="reset" disabled>重置切线</button>
-<button class="secondary" id="clear" disabled>清除切线</button>
+<button id="process" disabled>重新分析</button>
 </div>
 <div class="row">
-<label class="check"><input id="trimOuter" type="checkbox" checked> 自动裁外围白边/黑边</label>
-<label class="check"><input id="splitDouble" type="checkbox" checked> 检查宽图并尝试拆双页</label>
-<label class="check"><input id="trim" type="checkbox" checked> 输出时裁掉分段外侧白边</label>
+<label class="check"><input id="trimOuter" type="checkbox" checked> 自动裁外围白边</label>
+<label class="check"><input id="double" type="checkbox" checked> 保守检测双页</label>
+<label class="check"><input id="autoPack" type="checkbox" checked> 智能合并相邻格</label>
+<label class="check"><input id="trimSeg" type="checkbox" checked> 裁分段白边</label>
 </div>
-<p class="note">先处理扫描边缘，再判断双页，最后检测漫画格子。请注意：宽图不一定是双页，自动判断结果需要检查。</p>
-<div id="fileInfo" class="note">等待选择图片</div>
-<div id="pageChooser" class="row"></div>
+<p class="note">双页只有在宽高比和中缝证据都支持时才拆分。比例不足或证据不明确时保留整页。</p>
+<div id="pages" class="row"></div>
+<div id="info" class="note"></div>
 </section>
 
 <section class="card">
-<h2>2. 检测设置</h2>
+<h2>2. 分格参数</h2>
 <div class="row">
-<div class="field"><label for="threshold">白色间隙阈值</label>
-<select id="threshold"><option value="220">宽松</option><option value="235" selected>普通</option><option value="245">严格</option></select></div>
-<div class="field"><label for="coverage">横向连续覆盖率</label>
-<select id="coverage"><option value=".65">65% 宽松</option><option value=".78" selected>78% 推荐</option><option value=".88">88% 严格</option></select></div>
-<div class="field"><label for="minGap">最小空隙高度</label><input id="minGap" type="number" min="1" max="100" value="3"></div>
-<div class="field"><label for="maxCuts">最多候选主线</label>
-<select id="maxCuts"><option>3</option><option selected>6</option><option>8</option><option>12</option></select></div>
+<label>白色阈值
+<select id="threshold">
+<option value="220">宽松</option>
+<option value="235" selected>普通</option>
+<option value="245">严格</option>
+</select></label>
+<label>分隔线覆盖率
+<select id="coverage">
+<option value=".65">65%</option>
+<option value=".78" selected>78%</option>
+<option value=".88">88%</option>
+</select></label>
+<label>合并策略
+<select id="pack">
+<option value="balanced">平衡：尽量接近3:2</option>
+<option value="large">大格优先：文字更大</option>
+<option value="conservative">保守：少合并</option>
+</select></label>
 </div>
 <div class="row" style="margin-top:10px">
-<button id="detect" disabled>检测横向主线</button>
-<button id="add" class="secondary" disabled>手动添加切线</button>
-<label class="check"><input id="vertical" type="checkbox" checked> 检测左右小格</label>
+<button id="detect" disabled>识别格子并排版</button>
+<button id="clear" class="secondary" disabled>清除识别结果</button>
+<button id="download" disabled>下载全部 PNG</button>
 </div>
-<p class="note">红线可拖动。算法会优先寻找白色分隔带，减少把墙壁、窗框等格内线条当成主线的情况，但无法完全避免误判。</p>
 <div id="status"></div>
 </section>
 
 <section class="workspace">
 <div class="card">
-<h2>当前页与切线</h2>
-<div id="stage">请先选择漫画图片</div>
-<div class="row" style="margin-top:10px">
-<button id="build" disabled>生成预览</button>
-<button id="downloadAll" disabled>下载全部 PNG</button>
-</div>
+<h2>当前源图</h2>
+<div id="stage">请先选择图片</div>
 </div>
 <div class="card">
-<h2>输出规格</h2>
-<p><b>792 × 528 像素</b>，对应 X3 横屏方向。</p>
-<p class="note">双页拆分后，先切右页再切左页，符合日漫从右往左的阅读顺序。每个区域会按比例缩放，不会拉伸。</p>
-<p class="note">当前是算法测试版。跨页插画、斜格和无边框画格仍可能识别不准。</p>
+<h2>排版规则</h2>
+<p><b>目标画布：792×528</b></p>
+<p class="note">相邻格会尝试合并成更适合横屏的组合。过窄、过高的单格不一定独立输出；但组合时不拉伸、不裁掉原始内容。</p>
+<p class="note">无边框、斜格、跨格插画等复杂版面仍可能需要人工检查。低置信度时优先保留完整内容，不强行切割。</p>
 <div id="stats" class="note"></div>
 </div>
 </section>
 
 <section class="card">
-<h2>3. 分割结果</h2>
-<div id="results" class="note">生成预览后显示结果。</div>
+<h2>3. X3 页面预览</h2>
+<div id="results" class="note">分析后显示页面预览。</div>
 </section>
 </main>
 <script>
 (()=>{
 const $=id=>document.getElementById(id);
-const file=$('file'),stage=$('stage');
-let canvas=document.createElement('canvas');
-let ctx=canvas.getContext('2d',{willReadFrequently:true});
-let original=null,pages=[],pageIndex=0,cuts=[],outputs=[],name='manga',adding=false;
+let original=null,pages=[],pageIndex=0,outputs=[],filename='manga';
+const W=792,H=528;
+const lum=(r,g,b)=>.299*r+.587*g+.114*b;
 
-function enable(v){
-['reset','clear','detect','add','build'].forEach(id=>$(id).disabled=!v);
+function canvasFrom(src){
+const c=document.createElement('canvas');
+c.width=src.width;c.height=src.height;
+c.getContext('2d').drawImage(src,0,0);
+return c;
 }
-function sorted(a){
-return [...new Set(a.map(v=>Math.max(1,Math.min(canvas.height-1,Math.round(v)))))].sort((a,b)=>a-b);
+function crop(src,x,y,w,h){
+const c=document.createElement('canvas');
+c.width=Math.max(1,Math.round(w));c.height=Math.max(1,Math.round(h));
+c.getContext('2d').drawImage(src,x,y,w,h,0,0,c.width,c.height);
+return c;
 }
-function cropFrom(src,x0,y0,x1,y1){
-const out=document.createElement('canvas');
-out.width=Math.max(1,Math.round(x1-x0));
-out.height=Math.max(1,Math.round(y1-y0));
-out.getContext('2d').drawImage(src,x0,y0,x1-x0,y1-y0,0,0,out.width,out.height);
-return out;
+function pixels(c){
+return c.getContext('2d',{willReadFrequently:true}).getImageData(0,0,c.width,c.height).data;
 }
-
-/* 根据页面四周的背景色裁边。保护内部内容，避免把白色格间距裁掉。 */
-function trimOuter(src){
-const w=src.width,h=src.height;
-const c=src.getContext('2d',{willReadFrequently:true});
-const d=c.getImageData(0,0,w,h).data;
-const lum=(x,y)=>{
-const k=(y*w+x)*4;
-return .299*d[k]+.587*d[k+1]+.114*d[k+2];
-};
-const corner=(lum(0,0)+lum(w-1,0)+lum(0,h-1)+lum(w-1,h-1))/4;
-const nearWhite=corner>225;
-const threshold=nearWhite?242:24;
+function trimBorder(src){
+const d=pixels(src),w=src.width,h=src.height;
+const L=(x,y)=>{let k=(y*w+x)*4;return lum(d[k],d[k+1],d[k+2])};
+const bg=(L(0,0)+L(w-1,0)+L(0,h-1)+L(w-1,h-1))/4;
+const white=bg>220,threshold=white?242:25;
 const sx=Math.max(1,Math.floor(w/900)),sy=Math.max(1,Math.floor(h/900));
-let minX=w,minY=h,maxX=-1,maxY=-1;
-for(let y=0;y<h;y+=sy){
-for(let x=0;x<w;x+=sx){
-const v=lum(x,y);
-if(nearWhite?v<threshold:v>threshold){
-minX=Math.min(minX,x);minY=Math.min(minY,y);
-maxX=Math.max(maxX,x);maxY=Math.max(maxY,y);
-}
-}
-}
-if(maxX<0||maxY<0)return src;
-const pad=Math.round(Math.min(w,h)*.008);
-minX=Math.max(0,minX-pad);minY=Math.max(0,minY-pad);
-maxX=Math.min(w-1,maxX+pad);maxY=Math.min(h-1,maxY+pad);
-if(maxX-minX+1<w*.45||maxY-minY+1<h*.45)return src;
-return cropFrom(src,minX,minY,maxX+1,maxY+1);
+let x0=w,y0=h,x1=-1,y1=-1;
+for(let y=0;y<h;y+=sy)for(let x=0;x<w;x+=sx){
+let v=L(x,y);
+if(white?v<threshold:v>threshold){
+x0=Math.min(x0,x);y0=Math.min(y0,y);
+x1=Math.max(x1,x);y1=Math.max(y1,y);
+}}
+if(x1<0||x1-x0<w*.45||y1-y0<h*.45)return src;
+let pad=Math.round(Math.min(w,h)*.008);
+return crop(src,Math.max(0,x0-pad),Math.max(0,y0-pad),
+Math.min(w,x1+pad+1)-Math.max(0,x0-pad),
+Math.min(h,y1+pad+1)-Math.max(0,y0-pad));
 }
 
-/* 双页只作为候选判断：检查中间区域的亮缝/暗装订线。
-   极宽图片才会在证据不足时尝试拆分。 */
-function findDoublePage(src){
+/* 双页必须同时满足宽高比和中缝证据，不再因宽图就强行切半。 */
+function findSpread(src){
 const w=src.width,h=src.height,ratio=w/h;
-if(ratio<1.28)return null;
-const d=src.getContext('2d',{willReadFrequently:true}).getImageData(0,0,w,h).data;
-const mid=Math.floor(w/2),radius=Math.max(2,Math.floor(w*.035));
-const y0=Math.floor(h*.08),y1=Math.floor(h*.92);
-const stepY=Math.max(1,Math.floor(h/700));
-let best={score:0,x:mid,type:''};
-for(let x=Math.max(1,mid-radius);x<Math.min(w-1,mid+radius);x+=Math.max(1,Math.floor(w/1000))){
-let bright=0,dark=0,n=0;
-for(let y=y0;y<y1;y+=stepY){
-const k=(y*w+x)*4;
-const v=.299*d[k]+.587*d[k+1]+.114*d[k+2];
+if(ratio<1.72)return null;
+const d=pixels(src),mid=Math.floor(w/2);
+const radius=Math.max(2,Math.floor(w*.025));
+const stepY=Math.max(1,Math.floor(h/500));
+let best=null;
+for(let x=mid-radius;x<=mid+radius;x++){
+let bright=0,dark=0,n=0,edge=0;
+for(let y=Math.floor(h*.06);y<h*.94;y+=stepY){
+let k=(y*w+x)*4,v=lum(d[k],d[k+1],d[k+2]);
 if(v>238)bright++;
-if(v<45)dark++;
+if(v<38)dark++;
+if(x>1&&x<w-2){
+let kl=(y*w+x-2)*4,kr=(y*w+x+2)*4;
+edge+=Math.abs(lum(d[kl],d[kl+1],d[kl+2])-lum(d[kr],d[kr+1],d[kr+2]))/255;
+}
 n++;
 }
-const score=Math.max(bright/n,dark/n);
-if(score>best.score)best={score,x,type:bright/n>dark/n?'亮缝':'暗缝'};
+const light=bright/n,black=dark/n;
+const score=Math.max(light,black);
+if(!best||score>best.score)best={x,score,light,black,edge:edge/n};
 }
-if(best.score>.68||ratio>1.65)return best;
+/* 只有贯穿页面的大面积亮缝或暗装订缝才自动拆。 */
+if(best && (best.light>.78 || best.black>.72)){
+const leftW=best.x,rightW=w-best.x;
+if(leftW/h>0.48&&rightW/h>0.48&&leftW/h<1.45&&rightW/h<1.45)
+return best;
+}
 return null;
 }
-
 function preprocess(){
 if(!original)return;
-let base=document.createElement('canvas');
-base.width=original.width;base.height=original.height;
-base.getContext('2d').drawImage(original,0,0);
-if($('trimOuter').checked)base=trimOuter(base);
+let base=canvasFrom(original);
+if($('trimOuter').checked)base=trimBorder(base);
 pages=[];
-let split=null;
-if($('splitDouble').checked)split=findDoublePage(base);
-if(split){
-const x=split.x;
+let spread=$('double').checked?findSpread(base):null;
+if(spread){
 pages=[
-{canvas:cropFrom(base,x,0,base.width,base.height),label:'右页'},
-{canvas:cropFrom(base,0,0,x,base.height),label:'左页'}
+{canvas:crop(base,spread.x,0,base.width-spread.x,base.height),label:'右页'},
+{canvas:crop(base,0,0,spread.x,base.height),label:'左页'}
 ];
-}else pages=[{canvas:base,label:'整页'}];
-
+$('status').textContent='检测到明确中缝，已拆为右页、左页。请确认预览是否正确。';
+}else{
+pages=[{canvas:base,label:'整页'}];
+$('status').textContent='未发现足够可靠的双页证据，保留整张图片。';
+}
 pageIndex=0;
-const chooser=$('pageChooser');
-chooser.innerHTML='';
-if(pages.length>1){
+$('pages').innerHTML='';
 pages.forEach((p,i)=>{
-const b=document.createElement('button');
+if(pages.length===1)return;
+let b=document.createElement('button');
 b.className=i?'secondary':'';
 b.textContent='查看'+p.label;
 b.onclick=()=>selectPage(i);
-chooser.appendChild(b);
+$('pages').appendChild(b);
 });
-$('status').textContent='检测到疑似双页（'+split.type+'，位置 '+Math.round(split.x)+'px）。已先拆右页、左页；请检查中缝是否切对。';
-}else{
-$('status').textContent='未发现足够明显的双页中缝，当前按整页处理。';
-}
 selectPage(0);
 }
 function selectPage(i){
 pageIndex=i;
 const p=pages[i];
-canvas.width=p.canvas.width;canvas.height=p.canvas.height;
-ctx=canvas.getContext('2d',{willReadFrequently:true});
-ctx.drawImage(p.canvas,0,0);
-cuts=[];outputs=[];enable(true);drawStage();
-$('fileInfo').textContent=name+' · '+p.label+' · '+canvas.width+'×'+canvas.height;
-$('stats').textContent='当前页 '+(i+1)+'/'+pages.length+'；输出 792×528';
-$('results').textContent='请检测横向主线。';
-}
-function drawStage(){
-stage.innerHTML='';
-const wrap=document.createElement('div');
-wrap.id='stageWrap';
-const c=document.createElement('canvas');
-c.id='sourceCanvas';c.width=canvas.width;c.height=canvas.height;
-c.getContext('2d').drawImage(canvas,0,0);
-wrap.appendChild(c);stage.appendChild(wrap);
-renderCuts();
-c.addEventListener('click',e=>{
-if(!adding)return;
-const r=c.getBoundingClientRect();
-cuts=sorted([...cuts,(e.clientY-r.top)/r.height*canvas.height]);
-adding=false;$('add').textContent='手动添加切线';renderCuts();
-});
-}
-function renderCuts(){
-const wrap=$('stageWrap');if(!wrap)return;
-wrap.querySelectorAll('.cut').forEach(n=>n.remove());
-const c=$('sourceCanvas');
-const scale=c.getBoundingClientRect().height/canvas.height;
-cuts.forEach((y,i)=>{
-const line=document.createElement('div');
-line.className='cut';line.style.top=(y*scale)+'px';
-const label=document.createElement('span');
-label.textContent='主线'+(i+1)+' · 拖动';
-line.appendChild(label);wrap.appendChild(line);
-let startY=0,startCut=y;
-line.addEventListener('pointerdown',e=>{
-e.preventDefault();line.setPointerCapture(e.pointerId);
-startY=e.clientY;startCut=cuts[i];
-});
-line.addEventListener('pointermove',e=>{
-if(!line.hasPointerCapture(e.pointerId))return;
-const rect=c.getBoundingClientRect();
-cuts[i]=Math.max(1,Math.min(canvas.height-1,startCut+(e.clientY-startY)/rect.height*canvas.height));
-line.style.top=(cuts[i]*scale)+'px';
-label.textContent='主线'+(i+1)+' · '+Math.round(cuts[i])+'px';
-});
-line.addEventListener('pointerup',()=>{cuts=sorted(cuts);renderCuts();});
-});
+$('stage').innerHTML='';
+const c=canvasFrom(p.canvas);c.id='source';
+$('stage').appendChild(c);
+$('info').textContent=filename+' · '+p.label+' · '+c.width+'×'+c.height;
+$('stats').textContent='当前 '+(i+1)+'/'+pages.length+'；输出固定为792×528';
+outputs=[];
+$('results').textContent='点击“识别格子并排版”。';
+$('download').disabled=true;
+$('clear').disabled=false;
 }
 
-/* 主线检测：只把较连续的亮色间隙作为候选。 */
-function detectHorizontal(){
-const w=canvas.width,h=canvas.height;
-const d=ctx.getImageData(0,0,w,h).data;
+/* 找连续白色横向间隙；避免整幅图片只因一条普通线就切割。 */
+function horizontalBands(src){
+const w=src.width,h=src.height,d=pixels(src);
 const threshold=+$('threshold').value,coverage=+$('coverage').value;
-const minGap=Math.max(1,+$('minGap').value||3);
-const step=Math.max(1,Math.floor(w/700));
-const x0=Math.floor(w*.025),x1=Math.ceil(w*.975);
+const step=Math.max(1,Math.floor(w/600));
 let rows=[];
 for(let y=Math.floor(h*.025);y<h*.975;y++){
 let bright=0,dark=0,n=0;
-for(let x=x0;x<x1;x+=step){
-const k=(y*w+x)*4;
-const v=.299*d[k]+.587*d[k+1]+.114*d[k+2];
+for(let x=Math.floor(w*.025);x<w*.975;x+=step){
+let k=(y*w+x)*4,v=lum(d[k],d[k+1],d[k+2]);
 if(v>=threshold)bright++;
-if(v<75)dark++;
+if(v<65)dark++;
 n++;
 }
-if(bright/n>=coverage&&dark/n<.045)rows.push(y);
+if(bright/n>=coverage&&dark/n<.035)rows.push(y);
 }
 let bands=[];
-if(rows.length){
-let s=rows[0],p=s;
-for(let i=1;i<rows.length;i++){
-const y=rows[i];
-if(y>p+1){
-if(p-s+1>=minGap)bands.push([s,p]);
+if(!rows.length)return bands;
+let s=rows[0],last=s;
+for(let i=1;i<=rows.length;i++){
+let y=rows[i];
+if(i===rows.length||y>last+1){
+if(last-s+1>=Math.max(3,h*.003))
+bands.push({start:s,end:last,cut:(s+last)/2});
 s=y;
 }
-p=y;
+last=y;
 }
-if(p-s+1>=minGap)bands.push([s,p]);
-}
-let found=bands.map(([a,b])=>({y:(a+b)>>1,size:b-a+1}))
-.filter(o=>o.y>h*.04&&o.y<h*.96);
-let merged=[];
-found.forEach(o=>{
-const last=merged[merged.length-1];
-if(last&&o.y-last.y<h*.018){
-if(o.size>last.size)merged[merged.length-1]=o;
-}else merged.push(o);
-});
-cuts=merged.sort((a,b)=>b.size-a.size).slice(0,+$('maxCuts').value)
-.map(o=>o.y).sort((a,b)=>a-b);
-outputs=[];
-$('results').textContent='检查红线位置；如有误切，可以拖动或清除。';
-$('status').textContent='找到 '+cuts.length+' 条候选主线。';
-renderCuts();
+return bands.filter(b=>b.cut>h*.05&&b.cut<h*.95);
 }
 
-/* 裁分段的近白色边缘，不裁内部内容区域。 */
-function cropWhite(src){
-const c=src.getContext('2d',{willReadFrequently:true});
-const w=src.width,h=src.height,d=c.getImageData(0,0,w,h).data;
-let minX=w,minY=h,maxX=-1,maxY=-1;
-for(let y=0;y<h;y+=2)for(let x=0;x<w;x+=2){
-const k=(y*w+x)*4;
-const v=.299*d[k]+.587*d[k+1]+.114*d[k+2];
-if(v<246){minX=Math.min(minX,x);minY=Math.min(minY,y);maxX=Math.max(maxX,x);maxY=Math.max(maxY,y);}
-}
-if(maxX<0)return src;
-const pad=Math.round(Math.min(w,h)*.008);
-minX=Math.max(0,minX-pad);minY=Math.max(0,minY-pad);
-maxX=Math.min(w-1,maxX+pad);maxY=Math.min(h-1,maxY+pad);
-return cropFrom(src,minX,minY,maxX+1,maxY+1);
-}
-
-/* 寻找格子中间的近白色竖向间隔。 */
-function detectVertical(seg){
-const w=seg.width,h=seg.height;
-const d=seg.getContext('2d',{willReadFrequently:true}).getImageData(0,0,w,h).data;
-const x0=Math.floor(w*.08),x1=Math.ceil(w*.92);
-const y0=Math.floor(h*.05),y1=Math.ceil(h*.95);
-const step=Math.max(1,Math.floor(h/450));
+/* 找可信竖向白色间隙，只有足够连续且在区域内部才作为候选。 */
+function verticalCuts(src){
+const w=src.width,h=src.height,d=pixels(src);
 let good=[];
-for(let x=x0;x<x1;x++){
+for(let x=Math.floor(w*.08);x<w*.92;x++){
 let bright=0,dark=0,n=0;
-for(let y=y0;y<y1;y+=step){
-const k=(y*w+x)*4,v=.299*d[k]+.587*d[k+1]+.114*d[k+2];
-if(v>242)bright++;if(v<70)dark++;n++;
+for(let y=Math.floor(h*.06);y<h*.94;y+=Math.max(1,Math.floor(h/350))){
+let k=(y*w+x)*4,v=lum(d[k],d[k+1],d[k+2]);
+if(v>242)bright++;if(v<60)dark++;n++;
 }
-if(bright/n>.84&&dark/n<.035)good.push(x);
+if(bright/n>.86&&dark/n<.025)good.push(x);
 }
 let bands=[];
-if(good.length){
-let s=good[0],p=s;
-for(let i=1;i<good.length;i++){
-const x=good[i];
-if(x>p+1){if(p-s+1>=2)bands.push([s,p]);s=x;}
-p=x;
+if(!good.length)return bands;
+let s=good[0],last=s;
+for(let i=1;i<=good.length;i++){
+let x=good[i];
+if(i===good.length||x>last+1){
+if(last-s>=2)bands.push({start:s,end:last,x:(s+last)/2});
+s=x;
 }
-if(p-s+1>=2)bands.push([s,p]);
+last=x;
 }
-const xs=bands.map(([a,b])=>(a+b)>>1).filter(x=>x>w*.22&&x<w*.78);
-return xs.length?[xs.sort((a,b)=>Math.abs(a-w/2)-Math.abs(b-w/2))[0]]:[];
+return bands.filter(b=>b.x>w*.20&&b.x<w*.80);
+}
+function cropWhite(src){
+const d=pixels(src),w=src.width,h=src.height;
+let x0=w,y0=h,x1=-1,y1=-1;
+for(let y=0;y<h;y+=2)for(let x=0;x<w;x+=2){
+let k=(y*w+x)*4;
+if(lum(d[k],d[k+1],d[k+2])<246){
+x0=Math.min(x0,x);y0=Math.min(y0,y);
+x1=Math.max(x1,x);y1=Math.max(y1,y);
+}}
+if(x1<0)return src;
+const pad=Math.round(Math.min(w,h)*.008);
+x0=Math.max(0,x0-pad);y0=Math.max(0,y0-pad);
+x1=Math.min(w,x1+pad+1);y1=Math.min(h,y1+pad+1);
+return crop(src,x0,y0,x1-x0,y1-y0);
 }
 function fit(src){
-if($('trim').checked)src=cropWhite(src);
-const out=document.createElement('canvas');out.width=792;out.height=528;
-const c=out.getContext('2d');c.fillStyle='#fff';c.fillRect(0,0,792,528);
-const scale=Math.min(792/src.width,528/src.height);
+if($('trimSeg').checked)src=cropWhite(src);
+const out=document.createElement('canvas');out.width=W;out.height=H;
+const c=out.getContext('2d');
+c.fillStyle='#fff';c.fillRect(0,0,W,H);
+const scale=Math.min(W/src.width,H/src.height);
 const dw=src.width*scale,dh=src.height*scale;
-c.drawImage(src,(792-dw)/2,(528-dh)/2,dw,dh);
+c.drawImage(src,(W-dw)/2,(H-dh)/2,dw,dh);
 return out;
 }
-function build(){
-outputs=[];
-const bounds=[0,...sorted(cuts),canvas.height];
-for(let i=0;i<bounds.length-1;i++){
-const y0=bounds[i],y1=bounds[i+1];
-if(y1-y0<Math.max(20,canvas.height*.025))continue;
-const seg=cropFrom(canvas,0,y0,canvas.width,y1);
-let pieces=[];
-if($('vertical').checked){
-const xs=detectVertical(seg);
-if(xs.length){
-const x=xs[0];
-pieces=[
-{src:cropFrom(seg,x,0,seg.width,seg.height),side:'右'},
-{src:cropFrom(seg,0,0,x,seg.height),side:'左'}
-];
-}else pieces=[{src:seg,side:''}];
-}else pieces=[{src:seg,side:''}];
-pieces.forEach(p=>{
-outputs.push({
-canvas:fit(p.src),
-name:name+'_'+pages[pageIndex].label+'_段'+String(outputs.length+1).padStart(2,'0')+(p.side||'')
-});
-});
+
+/* 候选区域评分：接近3:2、面积较大、避免极窄长区域。 */
+function scoreRegion(r){
+const ratio=r.width/r.height;
+const ratioScore=Math.exp(-Math.abs(Math.log(ratio/(W/H)))*1.35);
+const areaScore=Math.min(1,(r.width*r.height)/(canvasArea()*.18));
+const skinny=Math.min(1,Math.min(r.width/r.height,r.height/r.width)*2.5);
+return ratioScore*.55+areaScore*.25+skinny*.20;
 }
+function canvasArea(){return pages[pageIndex].canvas.width*pages[pageIndex].canvas.height}
+function makeRegions(src){
+const hs=horizontalBands(src);
+const y=[0,...hs.map(b=>b.cut),src.height];
+let regions=[];
+for(let i=0;i<y.length-1;i++){
+let y0=Math.round(y[i]),y1=Math.round(y[i+1]);
+if(y1-y0<src.height*.07)continue;
+const row=crop(src,0,y0,src.width,y1-y0);
+const vs=verticalCuts(row);
+if(vs.length){
+/* 多个竖向候选时优先取中间最明显的一条，避免过度切碎。 */
+vs.sort((a,b)=>Math.abs(a.x-row.width/2)-Math.abs(b.x-row.width/2));
+const x=Math.round(vs[0].x);
+if(x>row.width*.22&&x<row.width*.78){
+regions.push({src:crop(row,x,0,row.width-x,row.height),xOrder:0});
+regions.push({src:crop(row,0,0,x,row.height),xOrder:1});
+}else regions.push({src:row});
+}else regions.push({src:row});
+}
+if(!regions.length)regions=[{src}];
+return regions;
+}
+
+/* 将连续区域组合成一页。组合后仍按比例缩放完整内容，不拉伸或裁剪。 */
+function packRegions(regions){
+if(!$('autoPack').checked)return regions;
+const mode=$('pack').value;
+let result=[],group=[],height=0;
+function flush(){
+if(!group.length)return;
+let x=0,totalH=0,maxW=0;
+group.forEach(r=>{maxW=Math.max(maxW,r.src.width);totalH+=r.src.height});
+const combined=document.createElement('canvas');
+combined.width=maxW;combined.height=totalH;
+const c=combined.getContext('2d');c.fillStyle='#fff';c.fillRect(0,0,maxW,totalH);
+group.forEach(r=>{c.drawImage(r.src,0,x);x+=r.src.height});
+result.push({src:combined});
+group=[];height=0;
+}
+for(const r of regions){
+const ratio=r.src.width/r.src.height;
+const isTall=ratio<.72;
+if(!group.length){group=[r];height=r.src.height;continue}
+const candidateH=height+r.src.height;
+const candidateW=Math.max(...group.map(a=>a.src.width),r.src.width);
+const ratioAfter=candidateW/candidateH;
+const allow=mode==='conservative'?(!isTall&&ratioAfter>1.05&&ratioAfter<2.15):
+mode==='large'?candidateH<height*2.05&&ratioAfter>.95:
+candidateH<height*1.8&&ratioAfter>.95&&ratioAfter<2.2;
+if(allow){group.push(r);height=candidateH}
+else{flush();group=[r];height=r.src.height}
+}
+flush();
+return result;
+}
+function analyze(){
+const src=pages[pageIndex].canvas;
+const regions=makeRegions(src);
+const packed=packRegions(regions);
+outputs=packed.map((r,i)=>({
+canvas:fit(r.src),
+name:filename+'_'+pages[pageIndex].label+'_'+String(i+1).padStart(3,'0')
+}));
 showOutputs();
-$('status').textContent='生成 '+outputs.length+' 张预览。';
-$('downloadAll').disabled=!outputs.length;
-}
-function download(c,n){
-const a=document.createElement('a');
-a.href=c.toDataURL('image/png');a.download=n;a.click();
+$('status').textContent='候选区域 '+regions.length+' 个，排版输出 '+outputs.length+' 页。请检查是否有误切或合并不合理。';
+$('download').disabled=!outputs.length;
+$('stats').textContent='源图 '+src.width+'×'+src.height+'；候选格区 '+regions.length+'；输出 '+outputs.length+' 页。每页792×528。';
 }
 function showOutputs(){
 const list=$('results');list.innerHTML='';
 outputs.forEach((o,i)=>{
 const box=document.createElement('div');box.className='result';
-const h=document.createElement('h3');h.textContent=(i+1)+'. '+o.name;box.appendChild(h);
-const c=document.createElement('canvas');c.width=792;c.height=528;
+const title=document.createElement('h3');title.textContent=(i+1)+'. '+o.name;box.appendChild(title);
+const c=document.createElement('canvas');c.width=W;c.height=H;
 c.getContext('2d').drawImage(o.canvas,0,0);box.appendChild(c);
-const b=document.createElement('button');b.textContent='下载 PNG';
-b.onclick=()=>download(o.canvas,o.name+'.png');box.appendChild(b);
+const b=document.createElement('button');b.textContent='下载此页';
+b.onclick=()=>downloadOne(o);box.appendChild(b);
 list.appendChild(box);
 });
 }
-file.addEventListener('change',()=>{
-const f=file.files&&file.files[0];if(!f)return;
-const url=URL.createObjectURL(f),im=new Image();
-im.onload=()=>{
+function downloadOne(o){
+const a=document.createElement('a');
+a.href=o.canvas.toDataURL('image/png');a.download=o.name+'.png';a.click();
+}
+$('file').addEventListener('change',()=>{
+const f=$('file').files[0];if(!f)return;
+const url=URL.createObjectURL(f),img=new Image();
+img.onload=()=>{
 original=document.createElement('canvas');
-original.width=im.naturalWidth;original.height=im.naturalHeight;
-original.getContext('2d').drawImage(im,0,0);
-name=f.name.replace(/\.[^.]+$/,'').replace(/[\\/:*?"<>|]/g,'_');
-$('preprocess').disabled=false;
-preprocess();
-URL.revokeObjectURL(url);
+original.width=img.naturalWidth;original.height=img.naturalHeight;
+original.getContext('2d').drawImage(img,0,0);
+filename=f.name.replace(/\.[^.]+$/,'').replace(/[\\/:*?"<>|]/g,'_');
+$('process').disabled=false;$('detect').disabled=false;
+preprocess();URL.revokeObjectURL(url);
 };
-im.onerror=()=>{alert('图片读取失败，请尝试 JPG 或 PNG');URL.revokeObjectURL(url);};
-im.src=url;
+img.onerror=()=>{alert('图片读取失败，请换 JPG 或 PNG');URL.revokeObjectURL(url)};
+img.src=url;
 });
-$('preprocess').onclick=preprocess;
-$('trimOuter').addEventListener('change',()=>{if(original)preprocess();});
-$('splitDouble').addEventListener('change',()=>{if(original)preprocess();});
-$('detect').onclick=detectHorizontal;
-$('reset').onclick=()=>{cuts=[];outputs=[];renderCuts();$('results').textContent='切线已重置';$('downloadAll').disabled=true;};
-$('clear').onclick=()=>{cuts=[];outputs=[];renderCuts();$('results').textContent='切线已清空';$('downloadAll').disabled=true;};
-$('add').onclick=()=>{adding=!adding;$('add').textContent=adding?'请点击图片放置切线…':'手动添加切线';};
-$('build').onclick=build;
-$('downloadAll').onclick=()=>outputs.forEach((o,i)=>setTimeout(()=>download(o.canvas,o.name+'.png'),i*350));
-['threshold','coverage','minGap','maxCuts'].forEach(id=>$(id).addEventListener('change',()=>{if(canvas.width)detectHorizontal();}));
-window.addEventListener('resize',()=>{if(canvas.width)renderCuts();});
+$('process').onclick=preprocess;
+$('double').addEventListener('change',()=>{if(original)preprocess()});
+$('trimOuter').addEventListener('change',()=>{if(original)preprocess()});
+$('detect').onclick=analyze;
+$('clear').onclick=()=>{
+outputs=[];$('results').textContent='结果已清除。';$('download').disabled=true;
+};
+$('download').onclick=()=>{
+outputs.forEach((o,i)=>setTimeout(()=>downloadOne(o),i*350));
+};
 })();
 </script>
 </body>
