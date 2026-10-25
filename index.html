@@ -340,27 +340,40 @@ async function process(){
 
       // 第一次裁边：处理整张原图。
       const trimmedOriginal=trimWhiteBorder(original);
-
       const w=trimmedOriginal.width;
       const h=trimmedOriginal.height;
-      const baseH=h/count;
       const baseName=safeName(file.name);
 
-      // 先均分，再对每一份分别执行第二次裁边。
-      for(let i=0;i<count;i++){
-        const y0=Math.max(0,Math.floor(i*baseH-overlap/2));
-        const y1=Math.min(
-          h,
-          Math.ceil((i+1)*baseH+(i<count-1?overlap/2:0))
-        );
+      // 每张取景按 792 × 528 比例，高度约为宽度的 2/3。
+      const targetH=Math.min(
+        h,
+        Math.max(1,Math.round(w*PAGE_H/PAGE_W))
+      );
+      const maxY=Math.max(0,h-targetH);
+      let positions;
 
-        // 均分得到的原始片段。
+      if(count===2){
+        // 两张：顶部、底部。
+        positions=[0,maxY];
+      }else{
+        // 三张：顶部、中间偏下、底部。
+        positions=[0,Math.round(maxY*0.58),maxY];
+      }
+
+      // 避免短图重复输出相同取景。
+      positions=positions.filter((y,i,a)=>a.indexOf(y)===i);
+
+      for(let i=0;i<positions.length;i++){
+        const y0=Math.max(0,Math.min(maxY,positions[i]));
+        const y1=Math.min(h,y0+targetH);
+
+        // 第一次裁边后，按比例取景。
         const rawPart=crop(trimmedOriginal,0,y0,w,y1-y0);
 
-        // 第二次裁边：每个片段独立重新检测四周白边。
+        // 每张取景再次独立裁白边。
         const trimmedPart=trimWhiteBorder(rawPart);
 
-        // 最后适配到 X3 横屏尺寸。
+        // 输出 X3 页面。
         const page=makePage(trimmedPart);
 
         addOutput(
