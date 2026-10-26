@@ -30,9 +30,9 @@ button:disabled{opacity:.45}
 <main>
 <h1>X3 日漫竖排文字检测与分割</h1>
 <p>
-不使用 OCR。先裁切外围白边，再检测双页中缝与真正的横向漫画格子。
-只有存在可信的漫画格子布局、且分割后适合 X3 横屏阅读时才切页。
-彩页保持整页；双页按右页、左页顺序处理。输出 PNG 尺寸为 528 × 792。
+不使用 OCR。先裁切外围白边，再检测双页中缝和可能的横向漫画格子。
+不会单凭对白框或一条横线决定分页；目录、标题页和彩页优先保持整页。
+双页按右页、左页顺序处理。输出 PNG 尺寸为 528 × 792。
 </p>
 
 <section class="card">
@@ -170,10 +170,7 @@ function trimInfo(src){
 }
 function trim(src){return trimInfo(src).canvas}
 
-/*
- * 只检测可能被轮廓围住的亮区。
- * 这些候选区仅用于调试，不用候选数量直接决定是否分页。
- */
+/* 亮区候选只用于调试，不作为分页的单独依据。 */
 function detectBalloons(src){
  const {g,w,h,scale}=grayImage(src,360,520);
  const visited=new Uint8Array(w*h),q=new Int32Array(w*h);
@@ -222,83 +219,68 @@ function detectBalloons(src){
 }
 
 /*
- * 找真正横向漫画格子边界：
- * 统计每一行的近白像素比例，同时检查该行是否有足够长的横向白带。
- * 单独的人物轮廓、速度线、对白框边缘通常不会横跨页面大部分宽度。
+ * 检测横向格子边界。
+ * 相比上一版，降低对浅色扫描图的限制，并允许边界有少量墨迹中断。
+ * 单条线不会直接触发分页，最终仍会检查页面内容和格子数量。
  */
 function detectPanelRows(src){
- const {g,w,h,scale}=grayImage(src,420,650);
+ const {g,w,h,scale}=grayImage(src,500,750);
  const rowWhite=new Float32Array(h);
  const rowDark=new Float32Array(h);
+ const rowInk=new Float32Array(h);
+ const x0=Math.floor(w*.04),x1=Math.ceil(w*.96);
  for(let y=0;y<h;y++){
-  let white=0,dark=0,n=0;
-  for(let x=Math.floor(w*.07);x<Math.ceil(w*.93);x++){
+  let white=0,dark=0,ink=0,n=0;
+  for(let x=x0;x<x1;x++){
    const v=g[y*w+x];n++;
-   if(v>=232)white++;
-   if(v<105)dark++;
+   if(v>=220)white++;
+   if(v<115)dark++;
+   if(v<185)ink++;
   }
   rowWhite[y]=white/Math.max(1,n);
   rowDark[y]=dark/Math.max(1,n);
+  rowInk[y]=ink/Math.max(1,n);
  }
- // 连续的横向空白带；短暂一两行的亮线不单独算格子边界
  const bands=[];
  let start=-1;
- for(let y=Math.floor(h*.04);y<Math.ceil(h*.96);y++){
-  const hit=rowWhite[y]>.84&&rowDark[y]<.055;
+ for(let y=Math.floor(h*.035);y<Math.ceil(h*.965);y++){
+  const hit=rowWhite[y]>.78&&rowDark[y]<.09;
   if(hit&&start<0)start=y;
   if((!hit||y===h-1)&&start>=0){
    const end=hit&&y===h-1?y:y-1;
-   if(end-start+1>=Math.max(2,Math.round(h*.004)))
-    bands.push({start,end,mid:Math.round((start+end)/2),thickness:end-start+1});
+   if(end-start+1>=Math.max(2,Math.round(h*.003)))
+    bands.push({start,end,mid:Math.round((start+end)/2)});
    start=-1;
   }
  }
- // 合并相近的亮带
  const merged=[];
  for(const b of bands){
   const last=merged[merged.length-1];
-  if(last&&b.start-last.end<=Math.max(3,h*.012)){
+  if(last&&b.start-last.end<=Math.max(3,h*.014)){
    last.end=b.end;last.mid=Math.round((last.start+last.end)/2);
-   last.thickness=last.end-last.start+1;
   }else merged.push({...b});
  }
  const boundaries=[];
  for(const b of merged){
   const y=b.mid;
-  if(y<h*.12||y>h*.88)continue;
-  const before=Math.max(0,y-Math.max(3,Math.round(h*.035)));
-  const after=Math.min(h-1,y+Math.max(3,Math.round(h*.035)));
-  const above=rowDark.slice(before,y).reduce((a,v)=>a+v,0)/Math.max(1,y-before);
-  const below=rowDark.slice(y+1,after+1).reduce((a,v)=>a+v,0)/Math.max(1,after-y);
-  // 分界线两侧都要有画面墨迹，避免把大面积空白或白对白框当作漫画格子
-  if(above>.012&&below>.012)boundaries.push({y:Math.round(y/scale),score:above+below});
+  if(y<h*.10||y>h*.90)continue;
+  const radius=Math.max(3,Math.round(h*.04));
+  const before=Math.max(0,y-radius),after=Math.min(h-1,y+radius);
+  let above=0,below=0,aboveInk=0,belowInk=0;
+  for(let yy=before;yy<y;yy++){above+=rowDark[yy];aboveInk+=rowInk[yy]}
+  for(let yy=y+1;yy<=after;yy++){below+=rowDark[yy];belowInk+=rowInk[yy]}
+  above/=Math.max(1,y-before);
+  below/=Math.max(1,after-y);
+  aboveInk/=Math.max(1,y-before);
+  belowInk/=Math.max(1,after-y);
+  // 边界上下必须都有内容，避免把纯文字目录中的横向留白当成格子线
+  if(above>.009&&below>.009&&aboveInk>.015&&belowInk>.015){
+   boundaries.push({y:Math.round(y/scale),score:above+below});
+  }
  }
- return {boundaries,debug:{w,h,scale,rowWhite,rowDark,bands:merged}};
+ return {boundaries,debug:{w,h,scale,rowWhite,rowDark,rowInk,bands:merged}};
 }
 
-/*
- * 判断页面是否具有多个真正的上下漫画格子。
- * 仅有对白框、没有横向格子边界时不切。
- * 两格页面默认保留整页；三格或更多才进入自动切页候选。
- */
-function analyzePanels(src){
- const detected=detectPanelRows(src);
- const ys=detected.boundaries.map(b=>b.y).sort((a,b)=>a-b);
- const minGap=src.height*.12;
- const separated=[];
- for(const y of ys){
-  if(!separated.length||y-separated[separated.length-1]>=minGap)separated.push(y);
- }
- const cuts=separated.filter(y=>y>src.height*.12&&y<src.height*.88);
- const segments=[];
- let last=0;
- for(const y of cuts){segments.push({top:last,bottom:y});last=y}
- segments.push({top:last,bottom:src.height});
- const valid=segments.filter(s=>s.bottom-s.top>=src.height*.14);
- return {cuts,segments:valid,detected};
-}
-
-/* 双页中缝检测：加强对中间浅色区域的对比度判断 */
 function detectGutter(src){
  if(src.width/src.height<1.25)return null;
  const {g,w,h,scale}=grayImage(src,700,900);
@@ -333,6 +315,70 @@ function makePage(src,rotate=false){
 }
 function safeName(s){return s.replace(/\.[^.]+$/,"").replace(/[\\/:*?"<>|]/g,"_").slice(0,100)||"comic"}
 function addOutput(c,name){outputs.push({canvas:c,name})}
+
+/* 目录页通常是许多短文字行，而非连续的大面积漫画画面。
+   这里统计暗色像素分布，辅助避免把文字目录切成多页。 */
+function pageInkProfile(src){
+ const {g,w,h}=grayImage(src,240,360);
+ let ink=0,rows=0,activeRows=0;
+ const rowInk=[];
+ for(let y=0;y<h;y++){
+  let n=0;
+  for(let x=0;x<w;x++)if(g[y*w+x]<150)n++;
+  const ratio=n/w;
+  rowInk.push(ratio);
+  ink+=n;
+  if(ratio>.012)activeRows++;
+ }
+ for(let y=1;y<h-1;y++){
+  if(rowInk[y]>.012&&rowInk[y-1]<.006&&rowInk[y+1]<.006)rows++;
+ }
+ return {density:ink/(w*h),activeRatio:activeRows/h,thinRows:rows};
+}
+
+function analyzePanels(src){
+ const detected=detectPanelRows(src);
+ const ys=detected.boundaries.map(b=>b.y).sort((a,b)=>a-b);
+ const minGap=src.height*.14;
+ const separated=[];
+ for(const y of ys){
+  if(!separated.length||y-separated[separated.length-1]>=minGap)separated.push(y);
+ }
+ const cuts=separated.filter(y=>y>src.height*.10&&y<src.height*.90);
+ const segments=[];
+ let last=0;
+ for(const y of cuts){
+  segments.push({top:last,bottom:y});
+  last=y;
+ }
+ segments.push({top:last,bottom:src.height});
+ return {cuts,segments,detected};
+}
+
+function shouldSplitByPanels(src,analysis){
+ const {cuts,segments}=analysis;
+ if(cuts.length<2)return {split:false,reason:"有效横向边界不足 2 条"};
+ if(segments.length<3)return {split:false,reason:"上下漫画格子不足 3 格"};
+
+ const valid=segments.filter(s=>s.bottom-s.top>=src.height*.14);
+ if(valid.length<3)return {split:false,reason:"有效漫画格子不足 3 格"};
+
+ // 目录和纯文字页一般墨迹分布较稀疏，且没有足够的实质画面内容。
+ const profile=pageInkProfile(src);
+ if(profile.density<.035&&profile.activeRatio<.48){
+  return {split:false,reason:"疑似目录或文字页，保持整页"};
+ }
+
+ // 如果页面大部分内容集中在单个区域，避免因零散白线而误切。
+ const ratios=valid.map(s=>(s.bottom-s.top)/src.height);
+ if(Math.max(...ratios)>.76){
+  return {split:false,reason:"页面主要内容集中在一个大区域"};
+ }
+
+ // 三格以上且各段高度合理时，才允许自动分割。
+ return {split:true,reason:"检测到 "+valid.length+" 个可能的上下漫画区域",segments:valid};
+}
+
 function makeDebug(src,det,analysis){
  const c=canvas(src.width,src.height),ctx=c.getContext("2d");
  ctx.drawImage(src,0,0);
@@ -377,123 +423,137 @@ function download(o){
  document.body.append(a);a.click();a.remove();
 }
 
-/*
- * 分割决策：
- * 1. 不根据对白框数量切页。
- * 2. 没有可信横向格子边界就保留整页。
- * 3. 两个上下格子默认整页保留，避免第 6、11 类误分。
- * 4. 三个或更多上下格子，且各段高度足够，才考虑分割。
- * 5. 每个候选段至少有一定高度，避免人物线条产生极小切片。
- */
-function shouldSplitByPanels(src,analysis){
- const {cuts,segments}=analysis;
- if(cuts.length<2)return {split:false,reason:"有效横向格子不足 3 格"};
- if(segments.length<3)return {split:false,reason:"有效漫画格子不足 3 格"};
- const minH=src.height*.14;
- if(segments.some(s=>s.bottom-s.top<minH))
-  return {split:false,reason:"存在过窄的候选格子"};
- const ratios=segments.map(s=>(s.bottom-s.top)/src.height);
- if(Math.max(...ratios)>.68&&segments.length===3)
-  return {split:false,reason:"页面主要内容集中在一个大区域"};
- return {split:true,reason:"检测到 "+segments.length+" 个上下漫画格子"};
-}
-
 async function process(){
  if(busy||!records.length)return;
  busy=true;$("run").disabled=true;outputs=[];$("preview").replaceChildren();
  try{
-  const parts=Number($("parts").value),overlap=Math.max(0,Math.min(200,Number($("overlap").value)||0));
+  const parts=Number($("parts").value);
+  const overlap=Math.max(0,Math.min(200,Number($("overlap").value)||0));
+
   for(let fi=0;fi<records.length;fi++){
    const r=records[fi],src=r.canvas;
    status("分析图片 "+(fi+1)+"/"+records.length+"："+r.file.name);
    r.debug=null;
+
    const color=isColorPage(src);
    const ti=trimInfo(src),base=ti.canvas;
    const gutter=color?null:detectGutter(base);
    let panels=[];
-   if(color)panels=[{canvas:base,suffix:""}];
-   else if(gutter!==null){
+
+   if(color){
+    panels=[{canvas:base,suffix:""}];
+   }else if(gutter!==null){
     panels=[
      {canvas:trim(crop(base,gutter,0,base.width-gutter,base.height)),suffix:"_R"},
      {canvas:trim(crop(base,0,0,gutter,base.height)),suffix:"_L"}
     ];
-   }else panels=[{canvas:base,suffix:""}];
+   }else{
+    panels=[{canvas:base,suffix:""}];
+   }
 
-   const decisions=[];let pageCount=0;
+   const decisions=[];
+   let pageCount=0;
+
    for(const p of panels){
-    const name=safeName(r.file.name)+p.suffix,panel=p.canvas;
+    const name=safeName(r.file.name)+p.suffix;
+    const panel=p.canvas;
+
     if(color){
-     addOutput(makePage(panel,false),name+"_portrait.png");pageCount++;
+     addOutput(makePage(panel,false),name+"_portrait.png");
+     pageCount++;
      decisions.push("彩页保持整页");
      continue;
     }
+
     const balloonDet=detectBalloons(panel);
     const analysis=analyzePanels(panel);
     const decision=shouldSplitByPanels(panel,analysis);
-    if($("debug").checked&&!r.debug)r.debug=makeDebug(panel,balloonDet,analysis);
+
+    if($("debug").checked&&!r.debug)
+     r.debug=makeDebug(panel,balloonDet,analysis);
 
     if(!decision.split){
-     addOutput(makePage(panel,false),name+"_portrait.png");pageCount++;
-     decisions.push("候选对白区 "+balloonDet.boxes.length+
-       "；横向格子边界 "+analysis.cuts.length+
-       "；"+decision.reason+"；保持整页");
+     addOutput(makePage(panel,false),name+"_portrait.png");
+     pageCount++;
+     decisions.push(
+      "亮区候选 "+balloonDet.boxes.length+
+      "；横向边界 "+analysis.cuts.length+
+      "；"+decision.reason+"；保持整页"
+     );
     }else{
-     // 按检测到的格子分组，而不是把页面机械切成固定份数。
-     // 如果用户选择 2 份则合并为上下两组；选择 3 份则保留三组。
-     const segs=analysis.segments;
-     let groups=[];
-     if(parts===2&&segs.length>=3){
-      const mid=Math.floor(segs.length/2);
+     let groups=decision.segments.map(s=>({top:s.top,bottom:s.bottom}));
+
+     // 选择 2 份时，将上下区域合并为两组。
+     if(parts===2&&groups.length>=3){
+      const mid=Math.floor(groups.length/2);
       groups=[
-       {top:segs[0].top,bottom:segs[mid-1].bottom},
-       {top:segs[mid].top,bottom:segs[segs.length-1].bottom}
+       {top:groups[0].top,bottom:groups[mid-1].bottom},
+       {top:groups[mid].top,bottom:groups[groups.length-1].bottom}
       ];
-     }else{
-      groups=segs.map(s=>({top:s.top,bottom:s.bottom}));
-      if(groups.length>parts){
-       const reduced=[];
-       for(let i=0;i<parts;i++){
-        const a=Math.floor(i*groups.length/parts),b=Math.floor((i+1)*groups.length/parts)-1;
-        reduced.push({top:groups[a].top,bottom:groups[b].bottom});
-       }
-       groups=reduced;
+     }else if(groups.length>parts){
+      const reduced=[];
+      for(let i=0;i<parts;i++){
+       const a=Math.floor(i*groups.length/parts);
+       const b=Math.max(a,Math.floor((i+1)*groups.length/parts)-1);
+       reduced.push({top:groups[a].top,bottom:groups[b].bottom});
       }
+      groups=reduced;
      }
-     // 每个组裁切后旋转为横屏；按原漫画从上到下输出
-     const rotated=rotate90(panel);
-     const scale=rotated.width/panel.height;
+
      for(let i=0;i<groups.length;i++){
       const g=groups[i];
       const y0=Math.max(0,Math.floor(g.top-overlap/2));
       const y1=Math.min(panel.height,Math.ceil(g.bottom+overlap/2));
       const piece=crop(panel,0,y0,panel.width,y1-y0);
-      addOutput(makePage(rotate90(piece),false),
-       name+"_part_"+String(i+1).padStart(2,"0")+".png");
+      addOutput(
+       makePage(rotate90(piece),false),
+       name+"_part_"+String(i+1).padStart(2,"0")+".png"
+      );
       pageCount++;
      }
-     decisions.push("候选对白区 "+balloonDet.boxes.length+
-       "；横向格子边界 "+analysis.cuts.length+
-       "；"+decision.reason+"；分为 "+groups.length+" 页");
+
+     decisions.push(
+      "亮区候选 "+balloonDet.boxes.length+
+      "；横向边界 "+analysis.cuts.length+
+      "；"+decision.reason+"；分为 "+groups.length+" 页"
+     );
     }
    }
-   r.reason=(color?"彩页；":gutter!==null?"双页中缝：右页优先；":"")+
+
+   r.reason=(color?"彩页；":gutter!==null?"检测到双页中缝，右页优先；":"")+
     decisions.join("；")+"；本图输出 "+pageCount+" 页";
-   renderOriginals();renderOutputs();
-   status("已处理 "+(fi+1)+"/"+records.length+"："+r.file.name+
-    "\n"+r.reason+"\n累计输出："+outputs.length+" 页");
+
+   renderOriginals();
+   renderOutputs();
+   status(
+    "已处理 "+(fi+1)+"/"+records.length+"："+r.file.name+
+    "\n"+r.reason+"\n累计输出："+outputs.length+" 页"
+   );
    await new Promise(resolve=>setTimeout(resolve,0));
   }
-  status("处理完成。\n输入图片："+records.length+
-   " 张\n输出 PNG："+outputs.length+" 张\n尺寸：528 × 792\n"+
+
+  status(
+   "处理完成。\n输入图片："+records.length+
+   " 张\n输出 PNG："+outputs.length+
+   " 张\n尺寸：528 × 792\n"+
    "红框是亮区候选，仅作参考；绿色线是检测到的横向分割线。\n"+
-   "本版本不使用 OCR。请重点检查第 3、6、11、15、18、19 张的结果。");
+   "本版本不使用 OCR。请检查目录页以及第 7、14、15 张的分割结果。"
+  );
  }catch(e){
-  console.error(e);status("处理失败："+(e.message||String(e)));
- }finally{busy=false;$("run").disabled=false}
+  console.error(e);
+  status("处理失败："+(e.message||String(e)));
+ }finally{
+  busy=false;
+  $("run").disabled=false;
+ }
 }
+
 $("files").addEventListener("change",async()=>{
  if(busy)return;
- records=[];outputs=[];$("preview").replaceChildren();$("originals").replaceChildren();$("download").disabled=true;
+ records=[];outputs=[];
+ $("preview").replaceChildren();
+ $("originals").replaceChildren();
+ $("download").disabled=true;
  const files=Array.from($("files").files||[]);
  if(!files.length){status("请选择图片。");return}
  try{
@@ -501,21 +561,27 @@ $("files").addEventListener("change",async()=>{
    const img=await loadImage(f);
    records.push({file:f,canvas:toCanvas(img),reason:"等待检测"});
   }
-  renderOriginals();status("读取完成："+records.length+" 张图片。");
- }catch(e){status("读取失败："+e.message)}
+  renderOriginals();
+  status("读取完成："+records.length+" 张图片。");
+ }catch(e){
+  status("读取失败："+e.message);
+ }
 });
 $("run").addEventListener("click",process);
 $("clear").addEventListener("click",()=>{
  if(busy)return;
  records=[];outputs=[];$("files").value="";
- $("originals").replaceChildren();$("preview").replaceChildren();$("download").disabled=true;
+ $("originals").replaceChildren();
+ $("preview").replaceChildren();
+ $("download").disabled=true;
  status("已清空。");
 });
 $("download").addEventListener("click",async()=>{
  if(!outputs.length)return;
  $("download").disabled=true;
  for(let i=0;i<outputs.length;i++){
-  download(outputs[i]);await new Promise(r=>setTimeout(r,250));
+  download(outputs[i]);
+  await new Promise(r=>setTimeout(r,250));
  }
  status("已发起 "+outputs.length+" 张 PNG 下载。如浏览器拦截，请允许多文件下载。");
  $("download").disabled=false;
