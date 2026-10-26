@@ -531,11 +531,11 @@ async function processImages(){
       if(gutter!==null){
         panels.push({
           canvas:trim(crop(base,gutter,0,base.width-gutter,base.height)),
-          suffix="_R"
+          suffix:"_R"
         });
         panels.push({
           canvas:trim(crop(base,0,0,gutter,base.height)),
-          suffix="_L"
+          suffix:"_L"
         });
       }else{
         panels.push({canvas:base,suffix:""});
