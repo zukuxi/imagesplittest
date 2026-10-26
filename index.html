@@ -36,54 +36,47 @@ hr{border:0;border-top:1px solid #ddd;margin:15px 0}
 <main>
 <h1>X3 日漫自动分割测试</h1>
 <p>
-自动判断漫画页面是否需要分割。不需要逐页选择方向。
-封面、标题页、章节目录页和没有明显分框的单页保持竖屏；
-检测到两个或以上漫画格的页面，才尝试横向阅读分割。
-最终每张预览均为 528 × 792。
-本工具仅生成 PNG 预览，不转换 XTC/XTCH。
+自动判断漫画页面是否需要分割，不需要逐页选择方向。
+彩页、封面、标题页、章节目录页和没有明显分框的单页保持整页。
+只有检测到至少两条分框线索的黑白页面才尝试分割。
+最终每张输出均为 528 × 792。本工具仅生成 PNG，不转换 XTC/XTCH。
 </p>
 
 <section class="card">
 <h3>1. 选择图片</h3>
 <input id="files" type="file" accept="image/*" multiple>
-<p class="small">支持多张图片，按文件选择顺序处理。建议先用几张有代表性的漫画页测试。</p>
+<p class="small">支持多张图片，按文件选择顺序处理。</p>
 </section>
 
 <section class="card">
 <h3>2. 分割设置</h3>
 <label>
-普通漫画内页分成几份
-<br>
+普通漫画内页分成几份<br>
 <select id="parts">
 <option value="2">2 份</option>
 <option value="3" selected>3 份</option>
 </select>
 </label>
-
 <label>
-相邻分割区域重叠量
-<br>
+相邻分割区域重叠量<br>
 <input id="overlap" type="number" min="0" max="200" step="4" value="24"> 像素
 <p class="small">保留少量重叠，减少人物或对白在分割边缘被切断的风险。</p>
 </label>
-
 <label>
-外围白边裁切
-<br>
+外围白边裁切<br>
 <select id="trim">
 <option value="normal">普通</option>
 <option value="strong" selected>积极</option>
 <option value="off">关闭</option>
 </select>
 </label>
-
 <button id="run">开始自动判断与分割</button>
 <button id="clear" class="secondary">清空</button>
 </section>
 
 <section class="card">
 <h3>3. 原图与自动判断结果</h3>
-<p class="small">这里会显示每张图被判断为普通漫画内页还是保持竖屏的页面，以及检测到的分框线索。</p>
+<p class="small">显示每张图的处理判断和输出结果。</p>
 <div id="originals"></div>
 </section>
 
@@ -94,7 +87,7 @@ hr{border:0;border-top:1px solid #ddd;margin:15px 0}
 
 <section class="card">
 <h3>5. 分割结果预览</h3>
-<p class="small">所有输出均为 528 × 792。横向阅读页的内容会旋转 90° 放入竖屏尺寸画布，方便检查设备横拿时的阅读方向。</p>
+<p class="small">所有输出均为 528 × 792。分割页旋转一次 90° 后放入竖屏画布。</p>
 <div id="preview"></div>
 <hr>
 <button id="download" disabled>下载全部 PNG</button>
@@ -110,21 +103,21 @@ const PAGE_W=528;
 const PAGE_H=792;
 let records=[];
 let outputs=[];
-  function addOutput(canvas, name) {
-  outputs.push({
-    canvas: canvas,
-    name: name
-  });
-  }
 let busy=false;
 
-function status(s){$("status").textContent=s;}
+function status(s){
+  $("status").textContent=s;
+}
 
 function makeCanvas(w,h){
   const c=document.createElement("canvas");
   c.width=Math.max(1,Math.round(w));
   c.height=Math.max(1,Math.round(h));
   return c;
+}
+
+function addOutput(canvas,name){
+  outputs.push({canvas,name});
 }
 
 function readImage(file){
@@ -159,7 +152,7 @@ function crop(src,x,y,w,h){
   return c;
 }
 
-/* 顺时针旋转90度，保持画面内容完整。 */
+/* 顺时针旋转90度 */
 function rotate90(src){
   const c=makeCanvas(src.height,src.width);
   const ctx=c.getContext("2d");
@@ -169,11 +162,41 @@ function rotate90(src){
   return c;
 }
 
-/* 裁切外围近白区域。 */
+/*
+ * 彩色页检测。
+ * 缩小后抽样。如果明显有彩色像素，就保守地保持整页。
+ * 这是启发式检测，浅色或低饱和度彩页仍可能被漏判。
+ */
+function isColorPage(src){
+  const c=makeCanvas(80,120);
+  const ctx=c.getContext("2d",{willReadFrequently:true});
+  ctx.drawImage(src,0,0,80,120);
+  const data=ctx.getImageData(0,0,80,120).data;
+
+  let colored=0;
+  let sampled=0;
+
+  for(let i=0;i<data.length;i+=16){
+    const r=data[i];
+    const g=data[i+1];
+    const b=data[i+2];
+    const max=Math.max(r,g,b);
+    const min=Math.min(r,g,b);
+
+    if(max>70 && max-min>35) colored++;
+    sampled++;
+  }
+
+  return colored/Math.max(1,sampled)>0.08;
+}
+
+/* 裁切外围近白区域 */
 function trimInfo(src){
   const mode=$("trim").value;
   const w=src.width,h=src.height;
-  if(mode==="off"||w<10||h<10)return {canvas:src,left:0,top:0};
+  if(mode==="off"||w<10||h<10){
+    return {canvas:src,left:0,top:0};
+  }
 
   const data=src.getContext("2d",{willReadFrequently:true}).getImageData(0,0,w,h).data;
   const threshold=mode==="strong"?0.86:0.94;
@@ -184,6 +207,7 @@ function trimInfo(src){
   function bright(r,g,b,a){
     return a<10||(r>=242&&g>=242&&b>=242);
   }
+
   function rowRatio(y){
     let n=0,t=0;
     for(let x=0;x<w;x+=step){
@@ -193,6 +217,7 @@ function trimInfo(src){
     }
     return n/Math.max(1,t);
   }
+
   function colRatio(x){
     let n=0,t=0;
     for(let y=0;y<h;y+=step){
@@ -212,22 +237,21 @@ function trimInfo(src){
   if(right-left<w*0.45||bottom-top<h*0.45){
     return {canvas:src,left:0,top:0};
   }
+
   return {
     canvas:crop(src,left,top,right-left+1,bottom-top+1),
     left,top
   };
 }
-function trim(src){return trimInfo(src).canvas;}
+
+function trim(src){
+  return trimInfo(src).canvas;
+}
 
 /*
- * 自动检测明显的漫画分框分隔线。
- *
- * 将图片缩小后分析横向和纵向的线：
- *  - 接近白色的连续留白；
- *  - 或者连续的深色边框。
- * 只检查大部分画面宽度/高度，尽量排除普通文字行。
- *
- * 这是启发式检测，不是精确的漫画格子识别。
+ * 分框检测：
+ * 找横向或纵向较长的近白分隔带、深色边框。
+ * 单条线索不够，不直接分割。
  */
 function detectPanelSeparators(src){
   const scale=Math.min(1,240/src.width,360/src.height);
@@ -248,11 +272,12 @@ function detectPanelSeparators(src){
   function groupLines(flags){
     const groups=[];
     let start=-1;
+
     for(let i=0;i<flags.length;i++){
       if(flags[i]&&start<0)start=i;
       if((!flags[i]||i===flags.length-1)&&start>=0){
         const end=flags[i]&&i===flags.length-1?i:i-1;
-        if(end-start+1>=1)groups.push({start,end,mid:(start+end)/2});
+        groups.push({start,end,mid:(start+end)/2});
         start=-1;
       }
     }
@@ -268,6 +293,7 @@ function detectPanelSeparators(src){
 
     for(let a=margin;a<axis-margin;a++){
       let white=0,dark=0,total=0;
+
       for(let b=Math.floor(span*0.12);b<span*0.88;b+=step){
         const x=horizontal?b:a;
         const y=horizontal?a:b;
@@ -279,8 +305,6 @@ function detectPanelSeparators(src){
 
       const wr=white/Math.max(1,total);
       const dr=dark/Math.max(1,total);
-
-      // 明显留白线，或横跨大范围的深色边框。
       flags[a]=wr>=0.78||dr>=0.76;
     }
 
@@ -298,7 +322,6 @@ function detectPanelSeparators(src){
       }
     }
 
-    // 排除过于靠近图片边缘的线。
     return merged.filter(g=>
       g.mid>axis*0.10&&g.mid<axis*0.90
     );
@@ -306,14 +329,10 @@ function detectPanelSeparators(src){
 
   const horizontal=axisLines(true);
   const vertical=axisLines(false);
-
-  // 一个明显分隔线通常就意味着至少两个漫画格。
-  // 只有很短、很弱的分隔线时，不贸然旋转或分割。
   const evidence=horizontal.length+vertical.length;
-  const hasPanels=evidence>=1;
 
   return {
-    hasPanels,
+    hasPanels:evidence>=2,
     horizontal:horizontal.length,
     vertical:vertical.length,
     evidence,
@@ -322,7 +341,7 @@ function detectPanelSeparators(src){
   };
 }
 
-/* 自动判断：先看页面是否有明显漫画分框，再看双页中缝。 */
+/* 双页中缝检测，保守处理 */
 function detectGutter(src){
   const w=src.width,h=src.height;
   if(w<200||h<200||w/h<1.25)return null;
@@ -370,6 +389,7 @@ function detectGutter(src){
 
   let good=0,total=0;
   const radius=Math.max(2,Math.round(sw*0.004));
+
   for(let y=0;y<sh;y+=yStep){
     let n=0,t=0;
     for(let x=Math.max(x0,best.x-radius);x<=Math.min(x1-1,best.x+radius);x++){
@@ -379,6 +399,7 @@ function detectGutter(src){
     if(n/Math.max(1,t)>=0.65)good++;
     total++;
   }
+
   if(good/Math.max(1,total)<0.48)return null;
 
   function content(a,b){
@@ -387,6 +408,7 @@ function detectGutter(src){
     let dark=0,n=0;
     const sx=Math.max(1,Math.floor((b-a)/25));
     const sy=Math.max(1,Math.floor(sh/300));
+
     for(let y=0;y<sh;y+=sy){
       for(let x=a;x<b;x+=sx){
         n++;
@@ -410,14 +432,13 @@ function safeName(s){
     .slice(0,100)||"image";
 }
 
-/* 所有最终预览画布均为设备的竖屏分辨率。 */
+/* 最终画布始终是528×792。sideways为true时只旋转一次。 */
 function makePortraitPage(src,sideways){
   const out=makeCanvas(PAGE_W,PAGE_H);
   const ctx=out.getContext("2d");
   ctx.fillStyle="#fff";
   ctx.fillRect(0,0,PAGE_W,PAGE_H);
 
-  // 横向阅读内容先旋转，再完整放入竖屏尺寸的画布。
   const content=sideways?rotate90(src):src;
   const margin=8;
   const scale=Math.min(
@@ -455,7 +476,7 @@ function renderOriginals(){
 
     const result=document.createElement("div");
     result.className="small";
-    result.textContent=r.reason||"等待自动判断";
+    result.textContent=r.reason||"等待自动分析";
 
     box.append(name,info,img,result);
     root.appendChild(box);
@@ -521,7 +542,13 @@ async function processImages(){
       status("正在分析 "+(fi+1)+"/"+records.length+"："+r.file.name);
 
       const original=r.canvas;
-      const gutterOriginal=detectGutter(original);
+      const colorPage=isColorPage(original);
+
+      /*
+       * 彩页不做跨页拆分，也不做普通分割。
+       * 黑白页才继续尝试识别中缝。
+       */
+      const gutterOriginal=colorPage?null:detectGutter(original);
       const originalTrim=trimInfo(original);
       const base=originalTrim.canvas;
       let gutter=null;
@@ -534,6 +561,7 @@ async function processImages(){
       }
 
       let panels=[];
+
       if(gutter!==null){
         panels.push({
           canvas:trim(crop(base,gutter,0,base.width-gutter,base.height)),
@@ -551,18 +579,11 @@ async function processImages(){
 
       for(const item of panels){
         const panel=item.canvas;
-        const detection=detectPanelSeparators(panel);
+        const detection=colorPage
+          ?{hasPanels:false,horizontal:0,vertical:0,evidence:0}
+          :detectPanelSeparators(panel);
 
-        /*
-         * 页面方向/分割规则：
-         * 1. 没有明显分框：保持竖屏，只输出一页。
-         * 2. 有明显分框：先把原页视为横向阅读内容，
-         *    旋转为横向布局后，沿横向长边切成2/3段。
-         * 3. 每段再旋转90度放进528×792页面。
-         */
-        const shouldSplit=detection.hasPanels;
-        const sideways=shouldSplit;
-        const work=sideways?rotate90(panel):panel;
+        const shouldSplit=!colorPage&&detection.hasPanels;
         const name=safeName(r.file.name)+item.suffix;
 
         if(!shouldSplit){
@@ -575,8 +596,15 @@ async function processImages(){
           continue;
         }
 
+        /*
+         * 先旋转一次，沿横向长边切片。
+         * 切出的每片已经处于目标阅读方向，
+         * 所以放入输出画布时不再旋转第二次。
+         */
+        const work=rotate90(panel);
         const n=count;
         const segmentW=work.width/n;
+
         for(let i=0;i<n;i++){
           const left=Math.round(i*segmentW);
           const right=Math.round((i+1)*segmentW);
@@ -586,7 +614,7 @@ async function processImages(){
           const piece=crop(work,x,0,end-x,work.height);
 
           addOutput(
-            makePortraitPage(piece,true),
+            makePortraitPage(piece,false),
             name+"_part_"+String(i+1).padStart(2,"0")+".png"
           );
           total++;
@@ -595,10 +623,13 @@ async function processImages(){
       }
 
       r.reason=
-        (gutter!==null
-          ?"识别到双页跨页，已按右页→左页拆开；"
-          :"未识别到可靠双页中缝；")+
-        "自动分析后输出 "+local+" 页。";
+        (colorPage
+          ?"检测到彩色页面，保持整页；"
+          :gutter!==null
+            ?"识别到疑似双页中缝，按右页→左页拆分；"
+            :"未识别到可靠双页中缝；")+
+        "分框线索："+(colorPage?0:"已分析")+
+        "；输出 "+local+" 页。";
 
       renderOriginals();
       renderOutputs();
@@ -606,7 +637,8 @@ async function processImages(){
       status(
         "已处理 "+(fi+1)+"/"+records.length+"："+r.file.name+
         "\n原图尺寸："+original.width+" × "+original.height+
-        "\n双页中缝："+(gutter!==null?"识别成功，右页→左页":"未识别到可靠中缝")+
+        "\n页面类型："+(colorPage?"彩色页，保持整页":"黑白页")+
+        "\n双页中缝："+(gutter!==null?"识别成功，右页→左页":"未拆分中缝")+
         "\n页面判断："+r.reason+
         "\n累计输出："+total+" 页"
       );
@@ -619,8 +651,8 @@ async function processImages(){
       "\n输入图片："+records.length+" 张"+
       "\n输出页面："+outputs.length+" 页"+
       "\n每张输出画布：528 × 792"+
-      "\n没有明显分框的图片保持竖屏；检测到分框的图片按横向阅读方式切割。"+
-      "\n注意：自动分框是启发式判断，仍可能误判特殊漫画页面。"
+      "\n彩页保持整页；分框线索不足的页面也保持整页。"+
+      "\n注意：自动识别是启发式判断，仍可能漏判或误判特殊页面。"
     );
 
   }catch(e){
