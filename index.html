@@ -33,10 +33,9 @@ hr{border:0;border-top:1px solid #ddd;margin:15px 0}
 <main>
 <h1>X3 图片裁边与日漫分割工具</h1>
 <p>
-处理顺序：原图裁白边 → 判断是否存在左右页中缝 →
-必要时按右页、左页顺序拆分 → 纵向切割 2 份或 3 份 →
-每份再次独立裁白边 → 输出 792 × 528 PNG。
-跨页图如果没有检测到明显中缝，就保留整张图。
+处理顺序：原图检测中缝 → 裁白边 → 必要时按右页、左页顺序拆分
+→ 纵向切割 2 份或 3 份 → 每份独立裁白边 → 输出 792 × 528 PNG。
+中缝检测会兼容一定程度的灰色底色和阴影。
 </p>
 
 <section class="card">
@@ -49,8 +48,7 @@ hr{border:0;border-top:1px solid #ddd;margin:15px 0}
 <h3>2. 切割设置</h3>
 
 <label>
-纵向切成几份
-<br>
+纵向切成几份<br>
 <select id="parts">
 <option value="2">切成 2 份</option>
 <option value="3" selected>切成 3 份</option>
@@ -58,31 +56,23 @@ hr{border:0;border-top:1px solid #ddd;margin:15px 0}
 </label>
 
 <label>
-相邻页面重叠量
-<br>
+相邻页面重叠量<br>
 <input id="overlap" type="number" min="0" max="200" step="4" value="24"> 像素
-<p class="small">
-保留原有设置。当前纵向取景通过顶部、中间偏下、底部的位置形成重叠；
-此数值暂不直接参与计算。
-</p>
+<p class="small">保留原设置；纵向取景仍按顶部、中间、底部位置切割。</p>
 </label>
 
 <label>
-白边裁切强度
-<br>
+白边裁切强度<br>
 <select id="trim">
 <option value="normal">普通：只裁明显白边</option>
 <option value="strong" selected>积极：尽量裁掉边框白边</option>
 <option value="off">不裁白边</option>
 </select>
-<p class="small">
-同一强度用于第一次和第二次裁边。边框水印或大块白色画面可能影响自动裁切。
-</p>
+<p class="small">裁边仅用于去除外围白边；中缝检测使用独立的灰度采样，不会修改原图颜色。</p>
 </label>
 
 <label>
-页面适配方式
-<br>
+页面适配方式<br>
 <select id="fit">
 <option value="fit" selected>完整显示，不裁切画面</option>
 </select>
@@ -104,9 +94,7 @@ hr{border:0;border-top:1px solid #ddd;margin:15px 0}
 
 <section class="card">
 <h3>5. 输出预览</h3>
-<p class="small">
-输出图片为 792 × 528。每份取景独立裁白边，之后完整缩放到 X3 页面。
-</p>
+<p class="small">输出图片为 792 × 528。每份取景独立裁白边，之后完整缩放到 X3 页面。</p>
 <div id="preview"></div>
 <hr>
 <button id="download" disabled>下载全部 PNG</button>
@@ -169,35 +157,27 @@ function fromImage(img){
 function crop(src,x,y,w,h){
   x=Math.max(0,Math.floor(x));
   y=Math.max(0,Math.floor(y));
-
   w=Math.max(1,Math.min(src.width-x,Math.ceil(w)));
   h=Math.max(1,Math.min(src.height-y,Math.ceil(h)));
 
   const c=canvas(w,h);
-
-  c.getContext("2d").drawImage(
-    src,
-    x,y,w,h,
-    0,0,w,h
-  );
-
+  c.getContext("2d").drawImage(src,x,y,w,h,0,0,w,h);
   return c;
 }
 
 /*
- * 裁掉图片四周连续的近白区域。
- * 普通模式较保守，积极模式允许一行或一列中
- * 存在少量非白像素。
+ * 裁掉外围连续近白区域。
+ * 返回裁切结果和裁切偏移量，便于将中缝坐标
+ * 从原图坐标准确换算到裁切后的坐标。
  */
-function trimWhiteBorder(src){
+function trimWhiteBorderInfo(src){
   const mode=$("trim").value;
-
-  if(mode==="off")return src;
-
   const w=src.width;
   const h=src.height;
 
-  if(w<10||h<10)return src;
+  if(mode==="off"||w<10||h<10){
+    return {canvas:src,left:0,top:0};
+  }
 
   const data=src.getContext("2d",{
     willReadFrequently:true
@@ -206,10 +186,7 @@ function trimWhiteBorder(src){
   const ratioThreshold=mode==="strong"?0.86:0.94;
   const maxX=Math.floor(w*(mode==="strong"?0.18:0.10));
   const maxY=Math.floor(h*(mode==="strong"?0.18:0.10));
-  const sampleStep=Math.max(
-    1,
-    Math.floor(Math.min(w,h)/1200)
-  );
+  const sampleStep=Math.max(1,Math.floor(Math.min(w,h)/1200));
 
   function isBright(r,g,b,a){
     if(a<10)return true;
@@ -217,256 +194,222 @@ function trimWhiteBorder(src){
   }
 
   function rowBrightRatio(y){
-    let bright=0;
-    let total=0;
-
+    let bright=0,total=0;
     for(let x=0;x<w;x+=sampleStep){
       const i=(y*w+x)*4;
-
-      if(isBright(
-        data[i],
-        data[i+1],
-        data[i+2],
-        data[i+3]
-      )){
-        bright++;
-      }
-
+      if(isBright(data[i],data[i+1],data[i+2],data[i+3]))bright++;
       total++;
     }
-
     return bright/Math.max(1,total);
   }
 
   function colBrightRatio(x){
-    let bright=0;
-    let total=0;
-
+    let bright=0,total=0;
     for(let y=0;y<h;y+=sampleStep){
       const i=(y*w+x)*4;
-
-      if(isBright(
-        data[i],
-        data[i+1],
-        data[i+2],
-        data[i+3]
-      )){
-        bright++;
-      }
-
+      if(isBright(data[i],data[i+1],data[i+2],data[i+3]))bright++;
       total++;
     }
-
     return bright/Math.max(1,total);
   }
 
-  let top=0;
-  let bottom=h-1;
-  let left=0;
-  let right=w-1;
+  let top=0,bottom=h-1,left=0,right=w-1;
 
-  while(
-    top<maxY &&
-    rowBrightRatio(top)>=ratioThreshold
-  ){
-    top++;
+  while(top<maxY&&rowBrightRatio(top)>=ratioThreshold)top++;
+  while(bottom>h-1-maxY&&rowBrightRatio(bottom)>=ratioThreshold)bottom--;
+  while(left<maxX&&colBrightRatio(left)>=ratioThreshold)left++;
+  while(right>w-1-maxX&&colBrightRatio(right)>=ratioThreshold)right--;
+
+  // 避免裁掉太多正文。
+  if(right-left<w*0.45||bottom-top<h*0.45){
+    return {canvas:src,left:0,top:0};
   }
 
-  while(
-    bottom>h-1-maxY &&
-    rowBrightRatio(bottom)>=ratioThreshold
-  ){
-    bottom--;
-  }
-
-  while(
-    left<maxX &&
-    colBrightRatio(left)>=ratioThreshold
-  ){
-    left++;
-  }
-
-  while(
-    right>w-1-maxX &&
-    colBrightRatio(right)>=ratioThreshold
-  ){
-    right--;
-  }
-
-  // 防止把图片误裁得过小。
-  if(
-    right-left<w*0.45 ||
-    bottom-top<h*0.45
-  ){
-    return src;
-  }
-
-  return crop(
-    src,
+  return {
+    canvas:crop(src,left,top,right-left+1,bottom-top+1),
     left,
-    top,
-    right-left+1,
-    bottom-top+1
-  );
+    top
+  };
+}
+
+function trimWhiteBorder(src){
+  return trimWhiteBorderInfo(src).canvas;
 }
 
 /*
- * 判断中间是否存在明显的近白竖向分隔带。
+ * 改进版中缝检测。
  *
- * 判断条件：
- * 1. 图片宽高比足够大；
- * 2. 中线附近的竖带在大部分高度上足够亮；
- * 3. 中缝左右两侧均存在一定的非白内容。
+ * 在中央 35%～65% 范围内寻找连续的浅色竖缝，
+ * 不再要求正中央附近必须几乎纯白。
  *
- * 不满足条件就不拆，尽量保护连续跨页画面。
+ * 仅在检测副本上采样灰度，不会改变输出画面。
+ * 返回原图坐标中的中缝位置；没有可靠结果时返回 null。
  */
 function detectCenterGutter(src){
   const w=src.width;
   const h=src.height;
 
-  // 宽高比只用于初筛，不单独决定拆页。
-  if(w/h<1.35)return null;
+  if(w<200||h<200||w/h<1.25)return null;
 
-  const bandW=Math.max(
-    5,
-    Math.round(w*0.025)
-  );
+  const maxScanW=700;
+  const maxScanH=900;
+  const scale=Math.min(1,maxScanW/w,maxScanH/h);
+  const sw=Math.max(1,Math.round(w*scale));
+  const sh=Math.max(1,Math.round(h*scale));
 
-  const center=Math.floor(w/2);
-  const x0=Math.max(
-    0,
-    center-Math.floor(bandW/2)
-  );
+  const sample=canvas(sw,sh);
+  const sctx=sample.getContext("2d",{willReadFrequently:true});
+  sctx.drawImage(src,0,0,sw,sh);
 
-  const scanW=Math.min(
-    bandW,
-    w-x0
-  );
+  const rgba=sctx.getImageData(0,0,sw,sh).data;
+  const gray=new Uint8Array(sw*sh);
 
-  // 缩小采样量，降低大图检测开销。
-  const scanH=Math.min(h,700);
-  const sample=canvas(scanW,scanH);
-  const sctx=sample.getContext("2d",{
-    willReadFrequently:true
-  });
+  for(let i=0,p=0;i<rgba.length;i+=4,p++){
+    gray[p]=Math.round(
+      rgba[i]*0.299+
+      rgba[i+1]*0.587+
+      rgba[i+2]*0.114
+    );
+  }
 
-  sctx.drawImage(
-    src,
-    x0,0,scanW,h,
-    0,0,scanW,scanH
-  );
+  const xStart=Math.floor(sw*0.35);
+  const xEnd=Math.ceil(sw*0.65);
+  const rowStep=Math.max(1,Math.floor(sh/600));
+  const scores=[];
 
-  const data=sctx.getImageData(
-    0,0,scanW,scanH
-  ).data;
+  /*
+   * 对每列评分：
+   * 浅色占比越高越好；
+   * 比左右邻近像素明显偏暗的列会受到惩罚，
+   * 避免把黑色装订线当作白色中缝。
+   */
+  for(let x=xStart;x<xEnd;x++){
+    let bright=0,veryBright=0,contrastPenalty=0,total=0;
 
-  let brightRows=0;
+    const offset=Math.max(2,Math.round(sw*0.012));
+    const lx=Math.max(0,x-offset);
+    const rx=Math.min(sw-1,x+offset);
 
-  for(let y=0;y<scanH;y++){
-    let bright=0;
+    for(let y=0;y<sh;y+=rowStep){
+      const v=gray[y*sw+x];
+      const lv=gray[y*sw+lx];
+      const rv=gray[y*sw+rx];
+      const neighbors=(lv+rv)/2;
 
-    for(let x=0;x<scanW;x++){
-      const i=(y*scanW+x)*4;
-      const r=data[i];
-      const g=data[i+1];
-      const b=data[i+2];
-      const a=data[i+3];
+      total++;
+      if(v>=190)bright++;
+      if(v>=220)veryBright++;
 
-      if(
-        a<10 ||
-        (r>=232&&g>=232&&b>=232)
-      ){
-        bright++;
+      if(v<neighbors-18)contrastPenalty++;
+    }
+
+    const brightRatio=bright/Math.max(1,total);
+    const veryBrightRatio=veryBright/Math.max(1,total);
+    const penalty=contrastPenalty/Math.max(1,total);
+
+    const score=
+      brightRatio*0.55+
+      veryBrightRatio*0.25-
+      penalty*0.30;
+
+    scores.push({x,score,brightRatio,veryBrightRatio});
+  }
+
+  if(!scores.length)return null;
+
+  // 对相邻列平滑评分，减少扫描噪点影响。
+  const radius=Math.max(2,Math.round(sw*0.006));
+  let best=null;
+
+  for(const candidate of scores){
+    let sum=0,count=0;
+
+    for(const item of scores){
+      if(Math.abs(item.x-candidate.x)<=radius){
+        sum+=item.score;
+        count++;
       }
     }
 
-    if(bright/scanW>=0.90){
-      brightRows++;
+    const smooth=sum/Math.max(1,count);
+
+    if(!best||smooth>best.score){
+      best={
+        x:candidate.x,
+        score:smooth,
+        brightRatio:candidate.brightRatio,
+        veryBrightRatio:candidate.veryBrightRatio
+      };
     }
   }
 
-  const gutterRatio=brightRows/Math.max(1,scanH);
+  // 宽松接受灰色扫描底色，但不接受明显黑暗区域。
+  if(best.brightRatio<0.52||best.score<0.43)return null;
 
-  // 中线附近大部分高度都应呈现近白色。
-  if(gutterRatio<0.72)return null;
+  /*
+   * 检查候选中缝是否沿大部分图像高度连续。
+   * 使用候选列周围的小带区域，容忍少量文字、
+   * 网点或阴影穿过中缝。
+   */
+  const bandRadius=Math.max(2,Math.round(sw*0.004));
+  let brightRows=0;
+  let sampledRows=0;
 
-  // 检查中缝左右两侧是否都有画面内容。
-  const sideW=Math.max(
-    4,
-    Math.round(w*0.025)
-  );
+  for(let y=0;y<sh;y+=rowStep){
+    let bright=0,total=0;
 
-  const sideOffset=Math.round(w*0.07);
+    for(let x=Math.max(xStart,best.x-bandRadius);
+        x<=Math.min(xEnd-1,best.x+bandRadius);x++){
+      if(gray[y*sw+x]>=185)bright++;
+      total++;
+    }
 
-  const leftX=Math.max(
-    0,
-    center-sideOffset-sideW
-  );
+    if(bright/Math.max(1,total)>=0.65)brightRows++;
+    sampledRows++;
+  }
 
-  const rightX=Math.min(
-    w-1,
-    center+sideOffset
-  );
+  const continuity=brightRows/Math.max(1,sampledRows);
+  if(continuity<0.48)return null;
 
-  const leftRegion=crop(
-    src,
-    leftX,
-    0,
-    Math.min(sideW,w-leftX),
-    h
-  );
+  /*
+   * 中缝左右必须都有内容。
+   * 使用较宽区域抽样，避免仅仅因为中缝旁边
+   * 几个像素是白色，就错误地认定为双页图。
+   */
+  function sideHasContent(x1,x2){
+    x1=Math.max(0,Math.min(sw-1,x1));
+    x2=Math.max(x1+1,Math.min(sw,x2));
 
-  const rightRegion=crop(
-    src,
-    rightX,
-    0,
-    Math.min(sideW,w-rightX),
-    h
-  );
+    let dark=0,total=0;
+    const stepX=Math.max(1,Math.floor((x2-x1)/30));
+    const stepY=Math.max(1,Math.floor(sh/400));
 
-  function hasInk(region){
-    const rw=region.width;
-    const rh=region.height;
-
-    const d=region.getContext("2d",{
-      willReadFrequently:true
-    }).getImageData(0,0,rw,rh).data;
-
-    let dark=0;
-    let total=0;
-
-    const yStep=Math.max(
-      1,
-      Math.floor(rh/500)
-    );
-
-    const xStep=Math.max(
-      1,
-      Math.floor(rw/12)
-    );
-
-    for(let y=0;y<rh;y+=yStep){
-      for(let x=0;x<rw;x+=xStep){
-        const i=(y*rw+x)*4;
+    for(let y=0;y<sh;y+=stepY){
+      for(let x=x1;x<x2;x+=stepX){
         total++;
-
-        if(
-          d[i+3]>=10 &&
-          (d[i]<210||d[i+1]<210||d[i+2]<210)
-        ){
-          dark++;
-        }
+        if(gray[y*sw+x]<195)dark++;
       }
     }
 
     return dark/Math.max(1,total)>0.025;
   }
 
-  if(!hasInk(leftRegion))return null;
-  if(!hasInk(rightRegion))return null;
+  const offset=Math.max(4,Math.round(sw*0.035));
+  const sideWidth=Math.max(8,Math.round(sw*0.09));
 
-  // 返回中线位置，供拆分使用。
-  return center;
+  const leftHasContent=sideHasContent(
+    best.x-offset-sideWidth,
+    best.x-offset
+  );
+
+  const rightHasContent=sideHasContent(
+    best.x+offset,
+    best.x+offset+sideWidth
+  );
+
+  if(!leftHasContent||!rightHasContent)return null;
+
+  return Math.max(1,Math.min(w-1,Math.round(best.x/scale)));
 }
 
 function makePage(src){
@@ -480,11 +423,10 @@ function makePage(src){
   const availableW=PAGE_W-margin*2;
   const availableH=PAGE_H-margin*2;
 
-  // 保持比例完整显示，不裁切、不放大。
+  // 完整显示，不裁切画面。
   const scale=Math.min(
     availableW/src.width,
-    availableH/src.height,
-    1
+    availableH/src.height
   );
 
   const dw=src.width*scale;
@@ -494,7 +436,6 @@ function makePage(src){
 
   ctx.imageSmoothingEnabled=true;
   ctx.imageSmoothingQuality="high";
-
   ctx.drawImage(src,dx,dy,dw,dh);
 
   return out;
@@ -511,9 +452,7 @@ function addOriginal(file,src){
   box.className="original";
 
   const title=document.createElement("div");
-  title.textContent=
-    file.name+
-    "（原图 "+src.width+" × "+src.height+"）";
+  title.textContent=file.name+"（原图 "+src.width+" × "+src.height+"）";
 
   const img=document.createElement("img");
   img.src=src.toDataURL("image/png");
@@ -524,18 +463,13 @@ function addOriginal(file,src){
 }
 
 function addOutput(c,name){
-  outputs.push({
-    canvas:c,
-    name:name
-  });
+  outputs.push({canvas:c,name:name});
 }
 
 function downloadOne(item){
   const a=document.createElement("a");
-
   a.href=item.canvas.toDataURL("image/png");
   a.download=item.name;
-
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -559,9 +493,7 @@ function render(){
     const btn=document.createElement("button");
     btn.className="secondary";
     btn.textContent="下载此页";
-    btn.addEventListener("click",()=>{
-      downloadOne(item);
-    });
+    btn.addEventListener("click",()=>downloadOne(item));
 
     box.append(img,caption,btn);
     root.appendChild(box);
@@ -593,44 +525,45 @@ async function process(){
     for(let fi=0;fi<files.length;fi++){
       const file=files[fi];
 
-      status(
-        "正在处理 "+
-        (fi+1)+"/"+files.length+"："+file.name
-      );
+      status("正在处理 "+(fi+1)+"/"+files.length+"："+file.name);
 
       const img=await readImage(file);
       const original=fromImage(img);
-
       addOriginal(file,original);
 
-      // 第一次裁边：处理整张图片。
-      const trimmedOriginal=trimWhiteBorder(original);
+      /*
+       * 先检测原图中缝，再裁外围白边。
+       * 这样不对称的白边不会让中缝位置偏移。
+       */
+      const originalGutterX=detectCenterGutter(original);
+      const trimInfo=trimWhiteBorderInfo(original);
+      const trimmedOriginal=trimInfo.canvas;
 
       const w=trimmedOriginal.width;
       const h=trimmedOriginal.height;
       const baseName=safeName(file.name);
 
-      // 只有检测到明显中缝才拆成左右页。
-      const gutterX=detectCenterGutter(trimmedOriginal);
+      // 将原图中缝坐标转换成裁边后坐标。
+      let gutterX=null;
+
+      if(originalGutterX!==null){
+        const adjustedX=originalGutterX-trimInfo.left;
+
+        if(adjustedX>w*0.25&&adjustedX<w*0.75){
+          gutterX=adjustedX;
+        }
+      }
 
       const panels=[];
 
       if(gutterX!==null){
-        // 日漫阅读顺序：右页先、左页后。
+        // 日漫阅读顺序：右页先，左页后。
         const rightPage=crop(
-          trimmedOriginal,
-          gutterX,
-          0,
-          w-gutterX,
-          h
+          trimmedOriginal,gutterX,0,w-gutterX,h
         );
 
         const leftPage=crop(
-          trimmedOriginal,
-          0,
-          0,
-          gutterX,
-          h
+          trimmedOriginal,0,0,gutterX,h
         );
 
         panels.push({
@@ -643,7 +576,6 @@ async function process(){
           suffix:"_L"
         });
       }else{
-        // 中缝不明确：不拆左右，保留完整画面。
         panels.push({
           canvas:trimmedOriginal,
           suffix:""
@@ -655,28 +587,21 @@ async function process(){
       for(let pi=0;pi<panels.length;pi++){
         const panel=panels[pi].canvas;
         const panelName=baseName+panels[pi].suffix;
-
         const pw=panel.width;
         const ph=panel.height;
 
         // 单张 X3 页面比例为 792 × 528。
         const targetH=Math.min(
           ph,
-          Math.max(
-            1,
-            Math.round(pw*PAGE_H/PAGE_W)
-          )
+          Math.max(1,Math.round(pw*PAGE_H/PAGE_W))
         );
 
         const maxY=Math.max(0,ph-targetH);
-
         let positions;
 
         if(count===2){
-          // 两份：顶部、底部。
           positions=[0,maxY];
         }else{
-          // 三份：顶部、中间偏下、底部。
           positions=[
             0,
             Math.round(maxY*0.58),
@@ -684,7 +609,7 @@ async function process(){
           ];
         }
 
-        // 短图可能产生重复位置，去掉重复项。
+        // 去除完全相同的取景起点，避免短图重复输出。
         positions=positions
           .map(y=>Math.max(0,Math.min(maxY,Math.round(y))))
           .filter((y,i,a)=>a.indexOf(y)===i);
@@ -693,27 +618,16 @@ async function process(){
           const y0=positions[i];
           const y1=Math.min(ph,y0+targetH);
 
-          // 纵向切出当前取景。
           const rawPart=crop(
-            panel,
-            0,
-            y0,
-            pw,
-            y1-y0
+            panel,0,y0,pw,y1-y0
           );
 
-          // 第二次裁边：每份独立处理。
           const trimmedPart=trimWhiteBorder(rawPart);
-
-          // 缩放到 X3 页面。
           const page=makePage(trimmedPart);
 
           addOutput(
             page,
-            panelName+
-            "_part_"+
-            String(i+1).padStart(2,"0")+
-            ".png"
+            panelName+"_part_"+String(i+1).padStart(2,"0")+".png"
           );
 
           pageCount++;
@@ -724,19 +638,17 @@ async function process(){
       status(
         "已处理 "+(fi+1)+"/"+files.length+"："+file.name+
         "\n原图尺寸："+original.width+" × "+original.height+
-        "\n第一次裁边后："+w+" × "+h+
-        "\n左右页判断："+(
+        "\n裁边后："+w+" × "+h+
+        "\n中缝检测："+(
           gutterX!==null
-            ?"检测到明显中缝，按右页 → 左页拆分"
-            :"未确认明显中缝，保留整张图"
+            ?"已识别，按右页 → 左页拆分（位置 "+Math.round(gutterX)+"）"
+            :"未找到可靠中缝，保留整张图"
         )+
         "\n本张输出："+localPageCount+" 页"+
         "\n累计输出："+pageCount+" 页"
       );
 
       render();
-
-      // 让浏览器有机会更新进度和预览。
       await new Promise(resolve=>setTimeout(resolve,0));
     }
 
@@ -766,11 +678,8 @@ $("clear").addEventListener("click",()=>{
   $("files").value="";
   $("preview").replaceChildren();
   $("originals").replaceChildren();
-
   outputs=[];
-
   $("download").disabled=true;
-
   status("已清空。请选择图片，然后开始切割。");
 });
 
@@ -778,11 +687,7 @@ $("download").addEventListener("click",async()=>{
   if(!outputs.length)return;
 
   $("download").disabled=true;
-
-  status(
-    "正在逐页发起下载，共 "+
-    outputs.length+" 个 PNG 文件。"
-  );
+  status("正在逐页发起下载，共 "+outputs.length+" 个 PNG 文件。");
 
   for(let i=0;i<outputs.length;i++){
     downloadOne(outputs[i]);
