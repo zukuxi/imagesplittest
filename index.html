@@ -1,1207 +1,563 @@
+
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>图片裁边与漫画分割工具</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>X3 日漫竖排文字检测与分割</title>
 <style>
-:root {
-  color-scheme: light;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-  color: #202124;
-  background: #f4f5f7;
-}
-* { box-sizing: border-box; }
-body { margin: 0; padding: 16px; }
-main { max-width: 1100px; margin: auto; }
-h1 { font-size: 24px; margin: 4px 0 8px; }
-h2 { font-size: 18px; margin: 0 0 12px; }
-p { line-height: 1.6; }
-.card {
-  background: #fff;
-  border: 1px solid #e0e3e8;
-  border-radius: 12px;
-  padding: 16px;
-  margin: 14px 0;
-}
-.muted { color: #667085; font-size: 13px; }
-.row {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  min-width: 125px;
-  flex: 1;
-}
-label { font-size: 14px; }
-input, select, button {
-  font: inherit;
-  min-height: 40px;
-  border-radius: 8px;
-}
-input[type="number"], select {
-  padding: 7px 9px;
-  border: 1px solid #cbd0d8;
-  background: white;
-  width: 100%;
-}
-input[type="file"] { max-width: 100%; }
-input[type="checkbox"] { min-height: auto; }
-button {
-  border: 1px solid #d0d5dd;
-  padding: 8px 15px;
-  cursor: pointer;
-  background: white;
-}
-button.primary {
-  background: #2458d3;
-  border-color: #2458d3;
-  color: white;
-}
-button:disabled { opacity: .45; cursor: not-allowed; }
-button.danger { color: #b42318; }
-.progress {
-  height: 8px;
-  background: #e9edf3;
-  border-radius: 10px;
-  overflow: hidden;
-  margin: 10px 0;
-}
-.progress > div {
-  height: 100%;
-  width: 0;
-  background: #2458d3;
-  transition: width .15s;
-}
-#status {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  line-height: 1.65;
-  font-size: 13px;
-  background: #f7f8fa;
-  padding: 12px;
-  border-radius: 8px;
-  max-height: 380px;
-  overflow: auto;
-}
-#preview {
-  display: grid;
-  grid-template-columns: repeat(auto-fill,minmax(150px,1fr));
-  gap: 12px;
-}
-.preview-item {
-  border: 1px solid #e0e3e8;
-  padding: 8px;
-  border-radius: 8px;
-  background: white;
-  min-width: 0;
-}
-.preview-item img {
-  display: block;
-  max-width: 100%;
-  max-height: 340px;
-  object-fit: contain;
-  margin: auto;
-}
-.preview-item .name {
-  font-size: 12px;
-  overflow-wrap: anywhere;
-  margin-top: 7px;
-}
-canvas { max-width: 100%; }
-details summary { cursor: pointer; }
-hr { border: 0; border-top: 1px solid #e5e7eb; }
-@media (max-width: 600px) {
-  body { padding: 9px; }
-  .card { padding: 12px; }
-  h1 { font-size: 21px; }
-  .field { min-width: 42%; }
-}
+*{box-sizing:border-box}
+body{margin:0;padding:14px;background:#f3f4f6;color:#222;font-family:system-ui,sans-serif}
+main{max-width:960px;margin:auto}
+h1{font-size:22px}
+h3{font-size:17px;margin-top:0}
+.card{background:white;padding:15px;border-radius:12px;margin:13px 0}
+p{font-size:14px;line-height:1.7;color:#555}
+label{display:block;margin:12px 0;font-size:14px}
+button,select,input{font:inherit}
+button{background:#1769aa;color:white;border:0;border-radius:8px;padding:10px 14px;margin:4px;cursor:pointer}
+button:disabled{opacity:.45}
+.secondary{background:#555}
+#status{white-space:pre-wrap;line-height:1.7;font-size:14px}
+#originals,#preview{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+.item{background:#eee;border-radius:8px;padding:8px;min-width:0}
+.item img{display:block;width:100%;height:auto;background:white}
+.item div{font-size:12px;overflow-wrap:anywhere;margin:6px 0}
+.small{font-size:12px;color:#777}
 </style>
 </head>
 <body>
 <main>
-  <h1>图片裁边与漫画分割工具</h1>
-  <p class="muted">
-    批量处理漫画图片，检测气泡与文字线索，辅助判断跨页图并分割。
-    原图不会被修改。
-  </p>
+<h1>X3 日漫竖排文字检测与分割</h1>
+<p>
+优先检测日漫竖排文字笔画，OCR 只作辅助，不要求 OCR 必须识别出完整句子。
+支持日文、简体中文、繁体中文，兼容横排对白。
+彩页保持整页；检测到疑似双页时按右页、左页顺序处理。
+输出 PNG 尺寸为 528 × 792。
+</p>
 
-  <section class="card">
-    <h2>1. 选择图片</h2>
-    <input id="files" type="file" accept="image/*" multiple>
-    <p class="muted">可以一次选择多张图片。建议先用几张图片测试检测效果。</p>
-    <div class="row">
-      <label><input id="debug" type="checkbox" checked> 输出检测调试图</label>
-      <label><input id="useOCR" type="checkbox" checked> 使用 OCR 辅助判断</label>
-    </div>
-  </section>
+<section class="card">
+<h3>1. 选择图片</h3>
+<input id="files" type="file" accept="image/*" multiple>
+</section>
 
-  <section class="card">
-    <h2>2. 分割设置</h2>
-    <div class="row">
-      <div class="field">
-        <label for="parts">分割模式</label>
-        <select id="parts">
-          <option value="auto">自动判断</option>
-          <option value="2">优先分为左右 2 页</option>
-          <option value="3">优先纵向分为 3 页</option>
-        </select>
-      </div>
-      <div class="field">
-        <label for="overlap">分割重叠（像素）</label>
-        <input id="overlap" type="number" min="0" max="150" value="24">
-      </div>
-      <div class="field">
-        <label for="trim">白边处理</label>
-        <select id="trim">
-          <option value="off">不裁白边</option>
-          <option value="auto" selected>自动裁白边</option>
-        </select>
-      </div>
-    </div>
-    <p class="muted">
-      自动模式会综合中缝、气泡、文字与图像比例判断。
-      OCR 只是辅助线索，不会仅因为 OCR 识别失败就直接认定没有文字。
-    </p>
-    <div class="row">
-      <button id="run" class="primary">开始处理</button>
-      <button id="clear" class="danger">清空结果</button>
-    </div>
-    <div class="progress"><div id="progressBar"></div></div>
-    <div id="status">请选择图片，然后点击“开始处理”。</div>
-  </section>
+<section class="card">
+<h3>2. 分割设置</h3>
+<label>每个页面分成几份
+<select id="parts">
+<option value="2">2 份</option>
+<option value="3" selected>3 份</option>
+</select>
+</label>
+<label>相邻分割重叠像素
+<input id="overlap" type="number" min="0" max="200" value="24">
+</label>
+<label>外围白边
+<select id="trim">
+<option value="normal">普通裁切</option>
+<option value="strong" selected>积极裁切</option>
+<option value="off">关闭</option>
+</select>
+</label>
+<label><input id="debug" type="checkbox" checked> 显示检测调试图</label>
+<button id="run">开始检测与分割</button>
+<button id="clear" class="secondary">清空</button>
+</section>
 
-  <section class="card">
-    <h2>3. 处理结果</h2>
-    <div class="row">
-      <button id="download" disabled>下载全部结果 ZIP</button>
-    </div>
-    <p class="muted">结果预览如下。调试图仅用于观察检测框，不会作为漫画页输出。</p>
-    <div id="preview"></div>
-  </section>
+<section class="card">
+<h3>3. 原图与检测信息</h3>
+<div id="originals"></div>
+</section>
+
+<section class="card">
+<h3>4. 处理状态</h3>
+<div id="status">请选择图片。</div>
+</section>
+
+<section class="card">
+<h3>5. 输出预览</h3>
+<div id="preview"></div>
+<button id="download" disabled>下载全部 PNG</button>
+</section>
 </main>
 
 <script>
-(() => {
+(function(){
 "use strict";
+const $=id=>document.getElementById(id);
+const PW=528,PH=792;
+let records=[],outputs=[],busy=false,workerPromise=null;
 
-const $ = id => document.getElementById(id);
-const fileInput = $("files");
-const runButton = $("run");
-const clearButton = $("clear");
-const downloadButton = $("download");
-const statusBox = $("status");
-const progressBar = $("progressBar");
-const preview = $("preview");
-
-let outputs = [];
-let workerPromise = null;
-let worker = null;
-let processing = false;
-
-function log(message) {
-  statusBox.textContent += "\n" + message;
-  statusBox.scrollTop = statusBox.scrollHeight;
+function status(s){$("status").textContent=s}
+function canvas(w,h){
+ const c=document.createElement("canvas");
+ c.width=Math.max(1,Math.round(w));c.height=Math.max(1,Math.round(h));
+ return c;
 }
-
-function setStatus(message) {
-  statusBox.textContent = message;
+function crop(src,x,y,w,h){
+ x=Math.max(0,Math.floor(x));y=Math.max(0,Math.floor(y));
+ w=Math.max(1,Math.min(src.width-x,Math.ceil(w)));
+ h=Math.max(1,Math.min(src.height-y,Math.ceil(h)));
+ const c=canvas(w,h);
+ c.getContext("2d").drawImage(src,x,y,w,h,0,0,w,h);
+ return c;
 }
-
-function progress(value) {
-  progressBar.style.width = Math.max(0, Math.min(100, value)) + "%";
+function rotate90(src){
+ const c=canvas(src.height,src.width),ctx=c.getContext("2d");
+ ctx.translate(c.width/2,c.height/2);ctx.rotate(Math.PI/2);
+ ctx.drawImage(src,-src.width/2,-src.height/2);
+ return c;
 }
-
-function clamp(value, min, max) {
-  return Math.max(min, Math.min(max, value));
+function loadImage(file){
+ return new Promise((resolve,reject)=>{
+  const url=URL.createObjectURL(file),img=new Image();
+  img.onload=()=>{URL.revokeObjectURL(url);resolve(img)};
+  img.onerror=()=>{URL.revokeObjectURL(url);reject(Error("无法读取："+file.name))};
+  img.src=url;
+ });
 }
-
-function sleepFrame() {
-  return new Promise(resolve => requestAnimationFrame(resolve));
+function toCanvas(img){
+ const c=canvas(img.naturalWidth||img.width,img.naturalHeight||img.height);
+ c.getContext("2d").drawImage(img,0,0,c.width,c.height);
+ return c;
 }
-
-function loadImage(file) {
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      resolve(img);
-    };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error("无法读取图片"));
-    };
-    img.src = url;
-  });
+function grayImage(src,maxW=500,maxH=700){
+ const scale=Math.min(1,maxW/src.width,maxH/src.height);
+ const w=Math.max(1,Math.round(src.width*scale));
+ const h=Math.max(1,Math.round(src.height*scale));
+ const c=canvas(w,h),ctx=c.getContext("2d",{willReadFrequently:true});
+ ctx.drawImage(src,0,0,w,h);
+ const rgba=ctx.getImageData(0,0,w,h).data,g=new Uint8Array(w*h);
+ for(let i=0,p=0;i<rgba.length;i+=4,p++)
+  g[p]=Math.round(.299*rgba[i]+.587*rgba[i+1]+.114*rgba[i+2]);
+ return {g,w,h,scale};
 }
-
-function imageToCanvas(img) {
-  const canvas = document.createElement("canvas");
-  canvas.width = img.naturalWidth || img.width;
-  canvas.height = img.naturalHeight || img.height;
-  canvas.getContext("2d", { willReadFrequently: true })
-    .drawImage(img, 0, 0);
-  return canvas;
+function isColorPage(src){
+ const {g}=grayImage(src,90,120);
+ const c=canvas(90,120),ctx=c.getContext("2d",{willReadFrequently:true});
+ ctx.drawImage(src,0,0,90,120);
+ const d=ctx.getImageData(0,0,90,120).data;
+ let colored=0,n=0;
+ for(let i=0;i<d.length;i+=16){
+  if(Math.max(d[i],d[i+1],d[i+2])-Math.min(d[i],d[i+1],d[i+2])>35)colored++;
+  n++;
+ }
+ return colored/Math.max(1,n)>.08;
 }
-
-function canvasToBlob(canvas, type = "image/png", quality) {
-  return new Promise((resolve, reject) => {
-    canvas.toBlob(blob => {
-      if (blob) resolve(blob);
-      else reject(new Error("图片编码失败"));
-    }, type, quality);
-  });
+function trimInfo(src){
+ const mode=$("trim").value,w=src.width,h=src.height;
+ if(mode==="off")return {canvas:src,left:0,top:0};
+ const {g,scale}=grayImage(src,600,800);
+ const sw=Math.round(w*scale),sh=Math.round(h*scale);
+ const threshold=mode==="strong"?242:248;
+ function rowWhite(y){
+  let n=0,t=0;
+  for(let x=0;x<sw;x+=2){if(g[y*sw+x]>=threshold)n++;t++}
+  return n/Math.max(1,t);
+ }
+ function colWhite(x){
+  let n=0,t=0;
+  for(let y=0;y<sh;y+=2){if(g[y*sw+x]>=threshold)n++;t++}
+  return n/Math.max(1,t);
+ }
+ let top=0,bottom=sh-1,left=0,right=sw-1;
+ const my=Math.floor(sh*(mode==="strong"?.18:.10));
+ const mx=Math.floor(sw*(mode==="strong"?.18:.10));
+ while(top<my&&rowWhite(top)>.94)top++;
+ while(bottom>sh-my&&rowWhite(bottom)>.94)bottom--;
+ while(left<mx&&colWhite(left)>.94)left++;
+ while(right>sw-mx&&colWhite(right)>.94)right--;
+ if(right-left<sw*.45||bottom-top<sh*.45)return {canvas:src,left:0,top:0};
+ const l=Math.round(left/scale),t=Math.round(top/scale);
+ return {canvas:crop(src,l,t,Math.round((right-left+1)/scale),Math.round((bottom-top+1)/scale)),left:l,top:t};
 }
+function trim(src){return trimInfo(src).canvas}
 
-function canvasFromBlob(blob) {
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(blob);
-    const img = new Image();
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      resolve(imageToCanvas(img));
-    };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error("无法读取图片数据"));
-    };
-    img.src = url;
-  });
-}
-
-function safeName(name) {
-  return name.replace(/\.[^.]+$/, "")
-    .replace(/[\\/:*?"<>|]/g, "_")
-    .slice(0, 150) || "image";
+/*
+ * 候选气泡检测。
+ * 用边缘外部白色区域的连通性寻找可能被轮廓包围的亮区。
+ * 不要求轮廓完全规整；后续还会使用文字笔画特征判断。
+ */
+function detectBalloons(src){
+ const {g,w,h,scale}=grayImage(src,360,520);
+ const visited=new Uint8Array(w*h),q=new Int32Array(w*h);
+ let head=0,tail=0;
+ function add(i){
+  if(i<0||i>=w*h||visited[i]||g[i]<205)return;
+  visited[i]=1;q[tail++]=i;
+ }
+ for(let x=0;x<w;x++){add(x);add((h-1)*w+x)}
+ for(let y=0;y<h;y++){add(y*w);add(y*w+w-1)}
+ while(head<tail){
+  const i=q[head++],x=i%w,y=(i/w)|0;
+  if(x>0)add(i-1);if(x<w-1)add(i+1);
+  if(y>0)add(i-w);if(y<h-1)add(i+w);
+ }
+ const boxes=[],minArea=Math.max(12,w*h*.0003),maxArea=w*h*.30;
+ for(let i=0;i<w*h;i++){
+  if(visited[i]||g[i]<205)continue;
+  head=0;tail=0;q[tail++]=i;visited[i]=1;
+  let area=0,minX=w,minY=h,maxX=0,maxY=0;
+  while(head<tail){
+   const p=q[head++],x=p%w,y=(p/w)|0;area++;
+   if(x<minX)minX=x;if(x>maxX)maxX=x;
+   if(y<minY)minY=y;if(y>maxY)maxY=y;
+   const ns=[x>0?p-1:-1,x<w-1?p+1:-1,y>0?p-w:-1,y<h-1?p+w:-1];
+   for(const n of ns)if(n>=0&&!visited[n]&&g[n]>=205){visited[n]=1;q[tail++]=n}
+  }
+  const bw=maxX-minX+1,bh=maxY-minY+1,ratio=bw/Math.max(1,bh);
+  if(area<minArea||area>maxArea||bw<5||bh<5||bw>w*.94||bh>h*.75||ratio<.18||ratio>12)continue;
+  if(bw*bh>w*h*.32)continue;
+  boxes.push({x:minX,y:minY,w:bw,h:bh,area});
+ }
+ boxes.sort((a,b)=>b.w*b.h-a.w*a.h);
+ const kept=[];
+ for(const b of boxes){
+  let duplicate=false;
+  for(const a of kept){
+   const iw=Math.max(0,Math.min(a.x+a.w,b.x+b.w)-Math.max(a.x,b.x));
+   const ih=Math.max(0,Math.min(a.y+a.h,b.y+b.h)-Math.max(a.y,b.y));
+   if(iw*ih/Math.max(1,Math.min(a.w*a.h,b.w*b.h))>.70){duplicate=true;break}
+  }
+  if(!duplicate)kept.push(b);
+ }
+ kept.sort((a,b)=>a.y-b.y||a.x-b.x);
+ return {boxes:kept,w,h,scale};
 }
 
 /*
- * 将图片缩放到检测用尺寸。
- * 返回 scaleX / scaleY，明确记录检测图与原图之间的坐标关系。
+ * 竖排笔画检测：不尝试直接读字。
+ * 将候选区域切成小格，统计深色像素比例、局部笔画密度、
+ * 以及是否出现多个分散的字符状墨迹团。
+ * 日文汉字、假名、简繁中文都以图像笔画形式参与判断。
  */
-function grayImage(src, maxW = 360, maxH = 520) {
-  const scale = Math.min(1, maxW / src.width, maxH / src.height);
-  const w = Math.max(1, Math.round(src.width * scale));
-  const h = Math.max(1, Math.round(src.height * scale));
-  const canvas = document.createElement("canvas");
-  canvas.width = w;
-  canvas.height = h;
-
-  const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  ctx.drawImage(src, 0, 0, w, h);
-  const data = ctx.getImageData(0, 0, w, h).data;
-  const g = new Uint8Array(w * h);
-
-  for (let i = 0, j = 0; i < data.length; i += 4, j++) {
-    g[j] = Math.round(
-      data[i] * 0.299 +
-      data[i + 1] * 0.587 +
-      data[i + 2] * 0.114
-    );
+function detectVerticalInk(src,box){
+ const {g,w,h,scale}=grayImage(src,700,1000);
+ const sx=src.width/w,sy=src.height/h;
+ let x0=Math.max(0,Math.floor(box.x*scale)),y0=Math.max(0,Math.floor(box.y*scale));
+ let x1=Math.min(w,Math.ceil((box.x+box.w)*scale)),y1=Math.min(h,Math.ceil((box.y+box.h)*scale));
+ if(x1-x0<5||y1-y0<5)return {likely:false,score:0,verticalColumns:0,clusters:0};
+ const bw=x1-x0,bh=y1-y0;
+ const padX=Math.round(bw*.07),padY=Math.round(bh*.07);
+ x0=Math.min(x1-1,x0+padX);x1=Math.max(x0+1,x1-padX);
+ y0=Math.min(y1-1,y0+padY);y1=Math.max(y0+1,y1-padY);
+ const cw=x1-x0,ch=y1-y0;
+ const cellW=Math.max(2,Math.round(cw*.22));
+ const cellH=Math.max(3,Math.round(ch*.085));
+ let inkTotal=0,total=0,verticalColumns=0,occupiedCells=0;
+ const rowInk=new Float32Array(ch),colInk=new Float32Array(cw);
+ for(let y=0;y<ch;y++){
+  for(let x=0;x<cw;x++){
+   const v=g[(y0+y)*w+x0+x];
+   // 对扫描漫画和浅色抗锯齿边缘更宽容
+   if(v<178){rowInk[y]++;colInk[x]++;inkTotal++}
+   total++;
   }
-
-  return {
-    g, w, h, canvas,
-    scaleX: w / src.width,
-    scaleY: h / src.height
-  };
+ }
+ const inkRatio=inkTotal/Math.max(1,total);
+ // 检查每一小格是否存在足够的文字笔画
+ let clusters=0,inCluster=false;
+ for(let yy=0;yy<ch;yy+=cellH){
+  let count=0,n=0;
+  for(let y=yy;y<Math.min(ch,yy+cellH);y++)
+   for(let x=0;x<cw;x++){n++;if(g[(y0+y)*w+x0+x]<178)count++}
+  const ratio=count/Math.max(1,n);
+  const occupied=ratio>.025&&ratio<.72;
+  if(occupied){occupiedCells++;if(!inCluster)clusters++;inCluster=true}
+  else inCluster=false;
+ }
+ // 竖排字符常形成一串上下分布的墨迹块；
+ // 这里检查纵向连续区域，不把“必须识别出字”当条件。
+ let run=0,maxRun=0;
+ for(let y=0;y<ch;y++){
+  const ratio=rowInk[y]/Math.max(1,cw);
+  if(ratio>.012&&ratio<.78){run++;maxRun=Math.max(maxRun,run)}
+  else run=0;
+ }
+ // 多个有墨迹的横向切片 + 合理墨迹密度，可作为竖排文字的弱证据
+ const sliceCount=Math.max(4,Math.floor(ch/Math.max(4,cellH)));
+ let filledSlices=0;
+ for(let s=0;s<sliceCount;s++){
+  const a=Math.floor(s*ch/sliceCount),b=Math.max(a+1,Math.floor((s+1)*ch/sliceCount));
+  let n=0,dark=0;
+  for(let y=a;y<b;y++)for(let x=0;x<cw;x++){n++;if(g[(y0+y)*w+x0+x]<178)dark++}
+  const r=dark/Math.max(1,n);
+  if(r>.008&&r<.65)filledSlices++;
+ }
+ // 竖向分散笔画证据
+ const sliceRatio=filledSlices/sliceCount;
+ const clusterEvidence=occupiedCells>=3&&clusters>=2;
+ const densityEvidence=inkRatio>.003&&inkRatio<.48;
+ const verticalEvidence=sliceRatio>.35&&maxRun>=Math.min(4,ch*.025);
+ const score=(densityEvidence?1:0)+(clusterEvidence?1:0)+(verticalEvidence?1:0);
+ return {
+  likely:densityEvidence&&(clusterEvidence||verticalEvidence),
+  score,inkRatio,occupiedCells,clusters,verticalColumns,
+  sliceRatio,maxRun
+ };
 }
 
-/*
- * 坐标转换的关键修复：
- * 检测框使用 detection 尺寸，OCR / 原图使用 src 尺寸。
- * 任何情况下都不能把缩小图坐标直接当作原图坐标。
- */
-function mapBoxToSource(box, detection, src) {
-  const sx = src.width / detection.w;
-  const sy = src.height / detection.h;
-
-  const x0 = clamp(Math.floor(box.x * sx), 0, src.width - 1);
-  const y0 = clamp(Math.floor(box.y * sy), 0, src.height - 1);
-  const x1 = clamp(Math.ceil((box.x + box.w) * sx), x0 + 1, src.width);
-  const y1 = clamp(Math.ceil((box.y + box.h) * sy), y0 + 1, src.height);
-
-  return {
-    x: x0,
-    y: y0,
-    w: x1 - x0,
-    h: y1 - y0
-  };
-}
-
-function isColorPage(src) {
-  const { data } = src.getContext("2d", {
-    willReadFrequently: true
-  }).getImageData(0, 0, src.width, src.height);
-
-  let colorCount = 0;
-  const total = Math.floor(data.length / 4);
-  const step = Math.max(1, Math.floor(total / 3000));
-
-  for (let p = 0; p < total; p += step) {
-    const i = p * 4;
-    const max = Math.max(data[i], data[i + 1], data[i + 2]);
-    const min = Math.min(data[i], data[i + 1], data[i + 2]);
-    if (max - min > 35) colorCount++;
-  }
-
-  return colorCount / Math.max(1, Math.ceil(total / step)) > 0.035;
-}
-
-/*
- * 检测近白区域的连通块，作为气泡候选。
- * 候选框只用于寻找线索，不能单独决定一定要分割。
- */
-function detectBalloons(src) {
-  const detection = grayImage(src, 360, 520);
-  const { g, w, h } = detection;
-  const total = w * h;
-  const seen = new Uint8Array(total);
-  const boxes = [];
-
-  const minArea = Math.max(14, Math.floor(total * 0.00007));
-  const maxArea = Math.floor(total * 0.15);
-  const queue = new Int32Array(total);
-
-  // 采用固定阈值，并检查候选框的宽高，避免大量小噪点。
-  const threshold = 226;
-
-  for (let start = 0; start < total; start++) {
-    if (seen[start] || g[start] < threshold) continue;
-
-    let head = 0, tail = 0;
-    queue[tail++] = start;
-    seen[start] = 1;
-
-    let minX = w, minY = h, maxX = 0, maxY = 0;
-    let area = 0;
-
-    while (head < tail) {
-      const p = queue[head++];
-      const x = p % w;
-      const y = Math.floor(p / w);
-
-      area++;
-      if (x < minX) minX = x;
-      if (x > maxX) maxX = x;
-      if (y < minY) minY = y;
-      if (y > maxY) maxY = y;
-
-      const neighbors = [
-        x > 0 ? p - 1 : -1,
-        x + 1 < w ? p + 1 : -1,
-        y > 0 ? p - w : -1,
-        y + 1 < h ? p + w : -1
-      ];
-
-      for (const q of neighbors) {
-        if (q < 0 || seen[q] || g[q] < threshold) continue;
-        seen[q] = 1;
-        queue[tail++] = q;
-      }
-
-      // 极大连通区域不再扩张，避免大面积白底占用过多时间。
-      if (tail >= total) break;
-    }
-
-    const bw = maxX - minX + 1;
-    const bh = maxY - minY + 1;
-
-    if (area < minArea || area > maxArea) continue;
-    if (bw < 5 || bh < 7) continue;
-    if (bw > w * 0.72 || bh > h * 0.72) continue;
-
-    const ratio = bw / Math.max(1, bh);
-    if (ratio > 7 || ratio < 0.12) continue;
-
-    boxes.push({
-      x: minX, y: minY, w: bw, h: bh,
-      area
-    });
-  }
-
-  // 先按面积从大到小，限制候选数量。
-  boxes.sort((a, b) => b.area - a.area);
-  const filtered = [];
-
-  for (const b of boxes) {
-    const centerX = b.x + b.w / 2;
-    const centerY = b.y + b.h / 2;
-
-    const duplicate = filtered.some(a => {
-      const ax = a.x + a.w / 2;
-      const ay = a.y + a.h / 2;
-      const dx = Math.abs(centerX - ax);
-      const dy = Math.abs(centerY - ay);
-      return dx < Math.min(a.w, b.w) * 0.55 &&
-             dy < Math.min(a.h, b.h) * 0.55;
-    });
-
-    if (!duplicate) filtered.push(b);
-    if (filtered.length >= 80) break;
-  }
-
-  return {
-    boxes: filtered,
-    detection,
-    w, h
-  };
-}
-
-/*
- * 竖排文字/笔画检测。
- * 注意：候选框先从 detection 坐标转换到灰度图坐标，
- * 不再将原图坐标、检测图坐标混用。
- */
-function detectVerticalInk(src, box, detection) {
-  const { g, w, h } = grayImage(src, 700, 1000);
-
-  const mx = w / detection.w;
-  const my = h / detection.h;
-
-  const x0 = clamp(Math.floor(box.x * mx), 0, w - 1);
-  const y0 = clamp(Math.floor(box.y * my), 0, h - 1);
-  const x1 = clamp(Math.ceil((box.x + box.w) * mx), x0 + 1, w);
-  const y1 = clamp(Math.ceil((box.y + box.h) * my), y0 + 1, h);
-
-  const bw = x1 - x0;
-  const bh = y1 - y0;
-  if (bw < 2 || bh < 3) {
-    return { likely: false, score: 0, dark: 0, density: 0 };
-  }
-
-  let dark = 0;
-  const columnHits = new Uint16Array(bw);
-  const rowHits = new Uint16Array(bh);
-  const area = bw * bh;
-
-  for (let y = y0; y < y1; y++) {
-    for (let x = x0; x < x1; x++) {
-      if (g[y * w + x] < 155) {
-        dark++;
-        columnHits[x - x0]++;
-        rowHits[y - y0]++;
-      }
-    }
-  }
-
-  const density = dark / Math.max(1, area);
-  let activeColumns = 0;
-  let activeRows = 0;
-
-  for (const n of columnHits) if (n >= 2) activeColumns++;
-  for (const n of rowHits) if (n >= 2) activeRows++;
-
-  const colRatio = activeColumns / Math.max(1, bw);
-  const rowRatio = activeRows / Math.max(1, bh);
-
-  // 文字通常不是完全空白，也不应整块全黑。
-  const likely =
-    dark >= 7 &&
-    density >= 0.012 &&
-    density <= 0.68 &&
-    (colRatio > 0.12 || rowRatio > 0.16);
-
-  const score = Math.round(
-    100 * Math.min(1, density * 3 + colRatio * 0.35 + rowRatio * 0.25)
-  );
-
-  return { likely, score, dark, density, colRatio, rowRatio };
-}
-
-async function getWorker() {
-  if (worker) return worker;
-  if (workerPromise) return workerPromise;
-
-  workerPromise = (async () => {
-    log("正在加载 Tesseract.js OCR 引擎……");
-
-    if (!window.Tesseract) {
-      await new Promise((resolve, reject) => {
-        const script = document.createElement("script");
-        script.src =
-          "https://cdn.jsdelivr.net/npm/tesseract.js@6.0.1/dist/tesseract.min.js";
-        script.onload = resolve;
-        script.onerror = () => reject(
-          new Error("Tesseract.js 加载失败，请检查网络或 CDN 是否可访问")
-        );
-        document.head.appendChild(script);
-      });
-    }
-
-    if (!window.Tesseract) {
-      throw new Error("Tesseract.js 加载后仍不可用");
-    }
-
-    log("OCR 引擎已加载，正在下载语言模型。首次运行可能需要等待。");
-
-    const lang = "jpn_vert+chi_sim+chi_tra";
-
-    const w = await window.Tesseract.createWorker(
-      lang,
-      1,
-      {
-        logger: m => {
-          if (m.status) {
-            const pct = typeof m.progress === "number"
-              ? ` ${Math.round(m.progress * 100)}%`
-              : "";
-            setStatus(
-              statusBox.textContent.split("\n").slice(-5).join("\n") +
-              "\nOCR：" + m.status + pct
-            );
-          }
-        }
-      }
-    );
-
-    try {
-      await w.setParameters({
-        preserve_interword_spaces: "1"
-      });
-    } catch (e) {
-      log("提示：部分 OCR 参数不受当前版本支持，将继续使用默认设置。");
-    }
-
-    worker = w;
-    log("OCR 语言模型准备完成。");
-    return worker;
+/* OCR 是辅助。模型下载失败或识别不到文字时，不否定图像笔画检测。 */
+async function getWorker(){
+ if(!workerPromise){
+  workerPromise=(async()=>{
+   const T=await import("https://cdn.jsdelivr.net/npm/tesseract.js@6.0.1/dist/tesseract.esm.min.js");
+   // 日文、简体中文、繁体中文
+   return await T.createWorker("jpn+chi_sim+chi_tra");
   })();
-
-  try {
-    return await workerPromise;
-  } catch (error) {
-    workerPromise = null;
-    worker = null;
-    throw error;
+ }
+ return workerPromise;
+}
+async function ocrAssist(src,box){
+ try{
+  const worker=await getWorker();
+  const scale=Math.min(4,Math.max(2,180/Math.max(1,Math.min(box.w,box.h))));
+  const x=Math.max(0,Math.floor(box.x-2)),y=Math.max(0,Math.floor(box.y-2));
+  const w=Math.min(src.width-x,Math.ceil(box.w+4)),h=Math.min(src.height-y,Math.ceil(box.h+4));
+  const c=canvas(w*scale,h*scale),ctx=c.getContext("2d",{willReadFrequently:true});
+  ctx.fillStyle="white";ctx.fillRect(0,0,c.width,c.height);
+  ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality="high";
+  ctx.drawImage(src,x,y,w,h,0,0,c.width,c.height);
+  // 自动对比度增强
+  const im=ctx.getImageData(0,0,c.width,c.height);
+  let min=255,max=0;
+  for(let i=0;i<im.data.length;i+=4){
+   const v=Math.round(.299*im.data[i]+.587*im.data[i+1]+.114*im.data[i+2]);
+   im.data[i]=im.data[i+1]=im.data[i+2]=v;
+   min=Math.min(min,v);max=Math.max(max,v);
   }
+  const range=Math.max(1,max-min);
+  for(let i=0;i<im.data.length;i+=4){
+   const v=Math.max(0,Math.min(255,Math.round((im.data[i]-min)*255/range)));
+   im.data[i]=im.data[i+1]=im.data[i+2]=v;
+  }
+  ctx.putImageData(im,0,0);
+  // 尝试识别；是否含字仍由图像特征决定
+  const result=await worker.recognize(c);
+  const text=(result.data.text||"").replace(/\s/g,"");
+  return {ok:/[\p{L}\p{N}\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(text),text,confidence:result.data.confidence||0,error:false};
+ }catch(e){
+  console.warn("OCR 辅助识别失败",e);
+  return {ok:false,text:"",confidence:0,error:true};
+ }
 }
 
-/*
- * OCR 输入必须是原图坐标框。
- * 先裁剪候选区域，再放大和增强对比度。
- */
-async function ocrAssist(src, box) {
-  try {
-    const marginX = Math.round(box.w * 0.08);
-    const marginY = Math.round(box.h * 0.08);
-
-    const x = clamp(box.x - marginX, 0, src.width - 1);
-    const y = clamp(box.y - marginY, 0, src.height - 1);
-    const right = clamp(box.x + box.w + marginX, x + 1, src.width);
-    const bottom = clamp(box.y + box.h + marginY, y + 1, src.height);
-
-    const cropW = right - x;
-    const cropH = bottom - y;
-
-    // OCR 图像放大，但避免过大画布导致移动设备内存占用过高。
-    const scale = Math.min(
-      4,
-      1800 / Math.max(cropW, cropH),
-      1200 / Math.max(1, Math.min(cropW, cropH))
-    );
-
-    const c = document.createElement("canvas");
-    c.width = Math.max(1, Math.round(cropW * scale));
-    c.height = Math.max(1, Math.round(cropH * scale));
-
-    const ctx = c.getContext("2d", { willReadFrequently: true });
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(
-      src, x, y, cropW, cropH,
-      0, 0, c.width, c.height
-    );
-
-    const imageData = ctx.getImageData(0, 0, c.width, c.height);
-    const d = imageData.data;
-
-    let sum = 0;
-    const count = Math.floor(d.length / 4);
-    for (let i = 0; i < d.length; i += 4) {
-      sum += d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
-    }
-    const mean = sum / Math.max(1, count);
-    const factor = mean < 100 ? 1.35 : mean > 220 ? 1.7 : 1.45;
-
-    for (let i = 0; i < d.length; i += 4) {
-      const gray = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
-      const v = clamp(Math.round((gray - mean) * factor + 180), 0, 255);
-      d[i] = d[i + 1] = d[i + 2] = v;
-      d[i + 3] = 255;
-    }
-    ctx.putImageData(imageData, 0, 0);
-
-    const ocr = await getWorker();
-
-    let result = await ocr.recognize(c);
-    let text = (result.data && result.data.text || "").trim();
-    let confidence = Number(result.data && result.data.confidence || 0);
-
-    // 首次识别没有文字或信心度很低时，改用稀疏文本模式重试。
-    if (!text || confidence < 18) {
-      try {
-        await ocr.setParameters({
-          tessedit_pageseg_mode: "11"
-        });
-        result = await ocr.recognize(c);
-        const retryText = (result.data && result.data.text || "").trim();
-        const retryConfidence = Number(
-          result.data && result.data.confidence || 0
-        );
-
-        if (retryText.length > text.length ||
-            retryConfidence > confidence) {
-          text = retryText;
-          confidence = retryConfidence;
-        }
-      } finally {
-        try {
-          await ocr.setParameters({
-            tessedit_pageseg_mode: "6"
-          });
-        } catch (e) {}
-      }
-    }
-
-    const hasText = /[\p{L}\p{N}\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u
-      .test(text);
-
-    return {
-      ok: hasText,
-      error: false,
-      text: text.slice(0, 120),
-      confidence
-    };
-  } catch (error) {
-    return {
-      ok: false,
-      error: true,
-      text: "",
-      confidence: 0,
-      message: error && error.message ? error.message : String(error)
-    };
+/* 找分页线索，辅助决定是否分割 */
+function detectSeparators(src){
+ const {g,w,h}=grayImage(src,260,380);
+ function countLines(horizontal){
+  const axis=horizontal?h:w,span=horizontal?w:h;
+  let count=0,inside=false,groups=0;
+  for(let a=Math.floor(axis*.10);a<axis*.90;a++){
+   let light=0,n=0;
+   for(let b=Math.floor(span*.10);b<span*.90;b+=2){
+    if(g[horizontal?a*w+b:b*w+a]>=235)light++;
+    n++;
+   }
+   const hit=light/Math.max(1,n)>.80;
+   if(hit&&!inside){groups++;inside=true}
+   if(!hit)inside=false;
   }
+  count=groups;return count;
+ }
+ const horizontal=countLines(true),vertical=countLines(false);
+ return {horizontal,vertical,total:horizontal+vertical,hasPanels:horizontal+vertical>=2};
+}
+function detectGutter(src){
+ if(src.width/src.height<1.25)return null;
+ const {g,w,h,scale}=grayImage(src,700,900);
+ let bestX=-1,best=-1;
+ for(let x=Math.floor(w*.35);x<Math.ceil(w*.65);x++){
+  let light=0,n=0;
+  for(let y=Math.floor(h*.06);y<h*.94;y+=2){if(g[y*w+x]>205)light++;n++}
+  const score=light/Math.max(1,n);
+  if(score>best){best=score;bestX=x}
+ }
+ if(best<.68)return null;
+ const margin=Math.max(3,Math.round(w*.04));
+ function darkRatio(a,b){
+  let dark=0,n=0;
+  for(let y=Math.floor(h*.1);y<h*.9;y+=3)
+   for(let x=Math.max(0,a);x<Math.min(w,b);x+=3){n++;if(g[y*w+x]<190)dark++}
+  return dark/Math.max(1,n);
+ }
+ if(darkRatio(bestX-margin*3,bestX-margin)<.025||
+    darkRatio(bestX+margin,bestX+margin*3)<.025)return null;
+ return Math.round(bestX/scale);
+}
+function makePage(src,rotate=false){
+ const content=rotate?rotate90(src):src;
+ const c=canvas(PW,PH),ctx=c.getContext("2d");
+ ctx.fillStyle="white";ctx.fillRect(0,0,PW,PH);
+ const scale=Math.min((PW-12)/content.width,(PH-12)/content.height);
+ const w=content.width*scale,h=content.height*scale;
+ ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality="high";
+ ctx.drawImage(content,(PW-w)/2,(PH-h)/2,w,h);
+ return c;
+}
+function safeName(s){return s.replace(/\.[^.]+$/,"").replace(/[\\/:*?"<>|]/g,"_").slice(0,100)||"comic"}
+function addOutput(c,name){outputs.push({canvas:c,name})}
+function makeDebug(src,detection,inkResults){
+ const c=canvas(src.width,src.height),ctx=c.getContext("2d");
+ ctx.drawImage(src,0,0);
+ const sx=src.width/detection.w,sy=src.height/detection.h;
+ detection.boxes.forEach((b,i)=>{
+  const r=inkResults[i];
+  ctx.strokeStyle=r&&r.ink.likely?"#00c853":"#ff1744";
+  ctx.lineWidth=Math.max(2,src.width/450);
+  ctx.strokeRect(b.x*sx,b.y*sy,b.w*sx,b.h*sy);
+ });
+ return c;
+}
+function renderOriginals(){
+ const root=$("originals");root.replaceChildren();
+ records.forEach((r,i)=>{
+  const box=document.createElement("div");box.className="item";
+  const img=document.createElement("img");img.src=(r.debug||r.canvas).toDataURL("image/jpeg",.85);
+  const text=document.createElement("div");
+  text.textContent=(i+1)+". "+r.file.name+"\n"+(r.reason||"等待处理");
+  box.append(img,text);root.append(box);
+ });
+}
+function renderOutputs(){
+ const root=$("preview");root.replaceChildren();
+ outputs.forEach((o,i)=>{
+  const box=document.createElement("div");box.className="item";
+  const img=document.createElement("img");img.src=o.canvas.toDataURL("image/png");
+  const t=document.createElement("div");t.textContent=(i+1)+". "+o.name;
+  const b=document.createElement("button");b.className="secondary";b.textContent="下载此页";
+  b.onclick=()=>download(o);
+  box.append(img,t,b);root.append(box);
+ });
+ $("download").disabled=!outputs.length;
+}
+function download(o){
+ const a=document.createElement("a");a.href=o.canvas.toDataURL("image/png");a.download=o.name;
+ document.body.append(a);a.click();a.remove();
 }
 
-function detectGutter(src) {
-  const { g, w, h } = grayImage(src, 360, 520);
-  const start = Math.floor(w * 0.25);
-  const end = Math.ceil(w * 0.75);
-  const scores = [];
+async function process(){
+ if(busy||!records.length)return;
+ busy=true;$("run").disabled=true;outputs=[];$("preview").replaceChildren();
+ try{
+  const parts=Number($("parts").value),overlap=Math.max(0,Math.min(200,Number($("overlap").value)||0));
+  for(let fi=0;fi<records.length;fi++){
+   const r=records[fi],src=r.canvas;
+   status("分析图片 "+(fi+1)+"/"+records.length+"："+r.file.name);
+   r.debug=null;
+   const color=isColorPage(src);
+   const ti=trimInfo(src),base=ti.canvas;
+   const gutter=color?null:detectGutter(base);
+   let panels=[];
+   if(color)panels=[{canvas:base,suffix:""}];
+   else if(gutter!==null){
+    panels=[
+     {canvas:trim(crop(base,gutter,0,base.width-gutter,base.height)),suffix:"_R"},
+     {canvas:trim(crop(base,0,0,gutter,base.height)),suffix:"_L"}
+    ];
+   }else panels=[{canvas:base,suffix:""}];
 
-  for (let x = start; x < end; x++) {
-    let bright = 0;
-    let dark = 0;
-    for (let y = 0; y < h; y++) {
-      const v = g[y * w + x];
-      if (v > 238) bright++;
-      if (v < 80) dark++;
+   const decisions=[];let pageCount=0;
+   for(const p of panels){
+    const name=safeName(r.file.name)+p.suffix,panel=p.canvas;
+    if(color){
+     addOutput(makePage(panel,false),name+"_portrait.png");pageCount++;
+     decisions.push("彩页保持整页");
+     continue;
     }
-    scores.push({
-      x,
-      score: bright / h - (dark / h) * 0.6
-    });
-  }
-
-  scores.sort((a, b) => b.score - a.score);
-  const best = scores[0];
-
-  if (!best || best.score < 0.25) {
-    return { found: false, x: Math.round(w / 2), confidence: 0 };
-  }
-
-  return {
-    found: true,
-    x: best.x / w,
-    confidence: best.score
-  };
-}
-
-function detectSeparators(src) {
-  const { g, w, h } = grayImage(src, 360, 520);
-  const rows = [];
-  const cols = [];
-
-  // 检查水平分隔线。
-  for (let y = Math.floor(h * 0.08); y < h * 0.92; y++) {
-    let bright = 0;
-    for (let x = 0; x < w; x++) {
-      if (g[y * w + x] > 238) bright++;
-    }
-    const ratio = bright / w;
-    if (ratio > 0.92) rows.push({ pos: y / h, score: ratio });
-  }
-
-  // 检查竖向分隔线。
-  for (let x = Math.floor(w * 0.08); x < w * 0.92; x++) {
-    let bright = 0;
-    for (let y = 0; y < h; y++) {
-      if (g[y * w + x] > 238) bright++;
-    }
-    const ratio = bright / h;
-    if (ratio > 0.92) cols.push({ pos: x / w, score: ratio });
-  }
-
-  function mergeNearby(list, minGap) {
-    const result = [];
-    for (const item of list) {
-      const last = result[result.length - 1];
-      if (last && item.pos - last.pos < minGap) {
-        if (item.score > last.score) result[result.length - 1] = item;
-      } else {
-        result.push(item);
-      }
-    }
-    return result;
-  }
-
-  return {
-    rows: mergeNearby(rows, 0.035),
-    cols: mergeNearby(cols, 0.035)
-  };
-}
-
-function trimInfo(src) {
-  const { g, w, h } = grayImage(src, 500, 800);
-  const threshold = 242;
-  const edge = 0.985;
-
-  let left = w, top = h, right = 0, bottom = 0;
-
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      if (g[y * w + x] < threshold) {
-        if (x < left) left = x;
-        if (x > right) right = x;
-        if (y < top) top = y;
-        if (y > bottom) bottom = y;
-      }
-    }
-  }
-
-  if (right <= left || bottom <= top) {
-    return { x: 0, y: 0, w: src.width, h: src.height };
-  }
-
-  const sx = src.width / w;
-  const sy = src.height / h;
-  let x = Math.floor(left * sx);
-  let y = Math.floor(top * sy);
-  let r = Math.ceil((right + 1) * sx);
-  let b = Math.ceil((bottom + 1) * sy);
-
-  // 避免误裁掉漫画边缘，限制裁边幅度。
-  x = Math.min(x, Math.floor(src.width * 0.12));
-  y = Math.min(y, Math.floor(src.height * 0.12));
-  r = Math.max(r, Math.ceil(src.width * edge));
-  b = Math.max(b, Math.ceil(src.height * edge));
-
-  x = clamp(x, 0, src.width - 1);
-  y = clamp(y, 0, src.height - 1);
-  r = clamp(r, x + 1, src.width);
-  b = clamp(b, y + 1, src.height);
-
-  return { x, y, w: r - x, h: b - y };
-}
-
-function cropCanvas(src, rect) {
-  const c = document.createElement("canvas");
-  c.width = Math.max(1, Math.round(rect.w));
-  c.height = Math.max(1, Math.round(rect.h));
-  c.getContext("2d").drawImage(
-    src,
-    rect.x, rect.y, rect.w, rect.h,
-    0, 0, c.width, c.height
-  );
-  return c;
-}
-
-function makeDebug(src, detection, results, gutter, separators) {
-  const c = document.createElement("canvas");
-  c.width = src.width;
-  c.height = src.height;
-  const ctx = c.getContext("2d");
-  ctx.drawImage(src, 0, 0);
-
-  const sx = src.width / detection.w;
-  const sy = src.height / detection.h;
-
-  ctx.lineWidth = Math.max(2, src.width / 500);
-  ctx.font = `${Math.max(12, src.width / 40)}px sans-serif`;
-
-  for (const item of results) {
-    const b = item.box;
-    const x = b.x * sx;
-    const y = b.y * sy;
-    const w = b.w * sx;
-    const h = b.h * sy;
-
-    ctx.strokeStyle = item.ocr && item.ocr.ok ? "#00a650" : "#e53935";
-    ctx.strokeRect(x, y, w, h);
-
-    if (item.ink && item.ink.likely) {
-      ctx.fillStyle = "#ff9800";
-      ctx.fillText("INK", x, Math.max(14, y - 3));
-    }
-  }
-
-  if (gutter && gutter.found) {
-    ctx.strokeStyle = "#00a0ff";
-    ctx.lineWidth = Math.max(3, src.width / 300);
-    const x = gutter.x * src.width;
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, src.height);
-    ctx.stroke();
-  }
-
-  if (separators) {
-    ctx.strokeStyle = "#9c27b0";
-    ctx.lineWidth = Math.max(2, src.width / 500);
-
-    for (const row of separators.rows) {
-      const y = row.pos * src.height;
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(src.width, y);
-      ctx.stroke();
-    }
-    for (const col of separators.cols) {
-      const x = col.pos * src.width;
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, src.height);
-      ctx.stroke();
-    }
-  }
-
-  return c;
-}
-
-/*
- * 将原图按 x 比例切割，重叠区域可按设置值添加。
- */
-function splitVertical(src, ratios, overlapPx) {
-  const cuts = [0, ...ratios, 1]
-    .map(v => clamp(v, 0, 1))
-    .sort((a, b) => a - b);
-
-  const unique = [];
-  for (const n of cuts) {
-    if (!unique.length || Math.abs(n - unique[unique.length - 1]) > 0.005) {
-      unique.push(n);
-    }
-  }
-
-  const result = [];
-
-  for (let i = 0; i < unique.length - 1; i++) {
-    const a = unique[i];
-    const b = unique[i + 1];
-    if (b - a < 0.04) continue;
-
-    const left = Math.max(0, Math.floor(a * src.width) -
-      (i > 0 ? overlapPx : 0));
-    const right = Math.min(src.width, Math.ceil(b * src.width) +
-      (i < unique.length - 2 ? overlapPx : 0));
-
-    if (right <= left) continue;
-
-    result.push(cropCanvas(src, {
-      x: left,
-      y: 0,
-      w: right - left,
-      h: src.height
-    }));
-  }
-
-  return result.length ? result : [src];
-}
-
-function addPreview(blob, name, isDebug = false) {
-  const item = document.createElement("div");
-  item.className = "preview-item";
-
-  const img = document.createElement("img");
-  const url = URL.createObjectURL(blob);
-  img.src = url;
-  img.alt = name;
-
-  const caption = document.createElement("div");
-  caption.className = "name";
-  caption.textContent = name + (isDebug ? "（调试图）" : "");
-
-  item.append(img, caption);
-  preview.appendChild(item);
-}
-
-async function processOne(file, fileIndex, totalFiles) {
-  log(`\n${fileIndex + 1}/${totalFiles}. ${file.name}`);
-
-  let img;
-  try {
-    img = await loadImage(file);
-  } catch (error) {
-    log("图片读取失败：" + error.message);
-    return;
-  }
-
-  let panel = imageToCanvas(img);
-
-  if ($("trim").value === "auto") {
-    const rect = trimInfo(panel);
-    if (rect.x || rect.y ||
-        rect.w !== panel.width || rect.h !== panel.height) {
-      panel = cropCanvas(panel, rect);
-      log(`自动裁边：${rect.w} × ${rect.h}`);
-    }
-  }
-
-  const det = detectBalloons(panel);
-  const gutter = detectGutter(panel);
-  const separators = detectSeparators(panel);
-
-  log(`气泡候选 ${det.boxes.length} 个；检测图 ${det.w}×${det.h}`);
-
-  let inkCount = 0;
-  let ocrCount = 0;
-  let ocrSuccess = 0;
-  let ocrErrors = 0;
-  const results = [];
-
-  const useOCR = $("useOCR").checked;
-
-  for (let i = 0; i < det.boxes.length; i++) {
-    const b = det.boxes[i];
-    const ink = detectVerticalInk(panel, b, det.detection);
-
-    let ocr = {
-      ok: false,
-      error: false,
-      text: "",
-      confidence: 0
-    };
-
-    if (ink.likely) {
+    status("检测漫画文字笔画："+r.file.name+p.suffix);
+    const det=detectBalloons(panel),results=[];
+    let inkCount=0,ocrCount=0,ocrErrors=0;
+    for(let i=0;i<det.boxes.length;i++){
+     const b=det.boxes[i];
+     const ink=detectVerticalInk(panel,b);
+     // 只有图像特征提示可能有字时才调用 OCR；OCR 失败不否定图像检测
+     let ocr={ok:false,error:false,text:"",confidence:0};
+     if(ink.likely){
+      ocrCount++;
+      ocr=await ocrAssist(panel,b);
+      if(ocr.error)ocrErrors++;
       inkCount++;
-
-      if (useOCR) {
-        // 重要修复：转换成原图坐标后再交给 OCR。
-        const sourceBox = mapBoxToSource(b, det.detection, panel);
-        ocrCount++;
-        ocr = await ocrAssist(panel, sourceBox);
-
-        if (ocr.error) {
-          ocrErrors++;
-          if (ocrErrors <= 3) {
-            log("OCR 错误：" + (ocr.message || "未知错误"));
-          }
-        } else if (ocr.ok) {
-          ocrSuccess++;
-        }
-      }
+     }
+     results.push({box:b,ink,ocr});
     }
+    const likelyBoxes=results.filter(x=>x.ink.likely);
+    const sep=detectSeparators(panel);
+    if($("debug").checked&&!r.debug)r.debug=makeDebug(panel,det,results);
 
-    results.push({ box: b, ink, ocr });
-
-    // 让移动设备定期刷新界面，避免长任务看起来像卡死。
-    if (i % 5 === 0) await sleepFrame();
-  }
-
-  log(`竖排/笔画疑似有字 ${inkCount} 个`);
-  log(`OCR 实际检查 ${ocrCount} 个；识别成功 ${ocrSuccess} 个；错误 ${ocrErrors} 个`);
-
-  const recognized = results
-    .filter(r => r.ocr && r.ocr.ok)
-    .slice(0, 5)
-    .map(r => r.ocr.text.replace(/\s+/g, " ").slice(0, 35));
-
-  if (recognized.length) {
-    log("OCR 示例：" + recognized.join(" / "));
-  }
-
-  const sepRows = separators.rows.filter(
-    r => r.pos > 0.12 && r.pos < 0.88
-  );
-  const sepCols = separators.cols.filter(
-    r => r.pos > 0.12 && r.pos < 0.88
-  );
-
-  const requested = $("parts").value;
-  let ratios = [];
-
-  if (requested === "2") {
-    ratios = [gutter.found ? gutter.x : 0.5];
-  } else if (requested === "3") {
-    ratios = [1 / 3, 2 / 3];
-  } else {
-    // 自动模式优先采用明显中缝；否则检查强分隔线。
-    if (gutter.found &&
-        gutter.x > 0.32 &&
-        gutter.x < 0.68 &&
-        gutter.confidence > 0.3) {
-      ratios = [gutter.x];
-    } else if (sepCols.length >= 1) {
-      const central = sepCols
-        .filter(r => r.pos > 0.28 && r.pos < 0.72)
-        .sort((a, b) => Math.abs(a.pos - 0.5) - Math.abs(b.pos - 0.5))[0];
-
-      if (central) ratios = [central.pos];
+    // 决策依据是疑似含字的图像区域，而不是 OCR 读出了几个字。
+    const shouldSplit=likelyBoxes.length>3&&sep.hasPanels;
+    if(!shouldSplit){
+     addOutput(makePage(panel,false),name+"_portrait.png");pageCount++;
+     decisions.push(
+      "气泡候选 "+det.boxes.length+
+      "；竖排/笔画疑似有字 "+likelyBoxes.length+
+      "；OCR 检查 "+ocrCount+
+      "；OCR 识别成功 "+results.filter(x=>x.ocr.ok).length+
+      "；分页线索 "+sep.total+
+      "；保持整页"
+     );
+    }else{
+     const rotated=rotate90(panel),sw=rotated.width/parts;
+     for(let i=0;i<parts;i++){
+      const left=Math.round(i*sw),right=Math.round((i+1)*sw),extra=Math.round(overlap/2);
+      const x=Math.max(0,left-(i>0?extra:0)),end=Math.min(rotated.width,right+(i<parts-1?extra:0));
+      const piece=crop(rotated,x,0,end-x,rotated.height);
+      addOutput(makePage(piece,false),name+"_part_"+String(i+1).padStart(2,"0")+".png");
+      pageCount++;
+     }
+     decisions.push(
+      "气泡候选 "+det.boxes.length+
+      "；竖排/笔画疑似有字 "+likelyBoxes.length+
+      "；OCR 识别成功 "+results.filter(x=>x.ocr.ok).length+
+      "；分页线索 "+sep.total+"；执行分割"
+     );
     }
-
-    // 竖向长图通常无需左右分割。
-    if (panel.height > panel.width * 1.35 && !gutter.found) {
-      ratios = [];
-    }
+   }
+   r.reason=(color?"彩页；":gutter!==null?"双页中缝：右页优先；":"")+
+    decisions.join("；")+"；本图输出 "+pageCount+" 页";
+   renderOriginals();renderOutputs();
+   status("已处理 "+(fi+1)+"/"+records.length+"："+r.file.name+
+    "\n"+r.reason+"\n累计输出："+outputs.length+" 页");
+   await new Promise(resolve=>setTimeout(resolve,0));
   }
-
-  const overlap = clamp(parseInt($("overlap").value, 10) || 0, 0, 150);
-  const pages = splitVertical(panel, ratios, overlap);
-
-  log(`分页线索：横线 ${sepRows.length} 条，竖线 ${sepCols.length} 条，` +
-      `中缝${gutter.found ? "有" : "未确认"}`);
-  log(`本图输出 ${pages.length} 页`);
-
-  const base = safeName(file.name);
-
-  for (let i = 0; i < pages.length; i++) {
-    const blob = await canvasToBlob(pages[i]);
-    const name = pages.length === 1
-      ? `${base}.png`
-      : `${base}-${String(i + 1).padStart(2, "0")}.png`;
-
-    outputs.push({ name, blob });
-    addPreview(blob, name);
-  }
-
-  if ($("debug").checked) {
-    const debugCanvas = makeDebug(panel, det.detection, results, gutter, separators);
-    const blob = await canvasToBlob(debugCanvas);
-    const name = `${base}-debug.png`;
-    outputs.push({ name, blob, debug: true });
-    addPreview(blob, name, true);
-  }
+  status("处理完成。\n输入图片："+records.length+
+   " 张\n输出 PNG："+outputs.length+" 张\n尺寸：528 × 792\n"+
+   "绿框表示图像笔画检测认为疑似有字，红框表示未通过笔画判断。\n"+
+   "注意：竖排笔画检测是启发式方法，仍可能受速度线、背景纹理和不规则气泡影响。");
+ }catch(e){
+  console.error(e);status("处理失败："+(e.message||String(e)));
+ }finally{busy=false;$("run").disabled=false}
 }
-
-async function run() {
-  if (processing) return;
-
-  const files = Array.from(fileInput.files || [])
-    .filter(f => f.type.startsWith("image/"));
-
-  if (!files.length) {
-    setStatus("请先选择图片文件。");
-    return;
+$("files").addEventListener("change",async()=>{
+ if(busy)return;
+ records=[];outputs=[];$("preview").replaceChildren();$("originals").replaceChildren();$("download").disabled=true;
+ const files=Array.from($("files").files||[]);
+ if(!files.length){status("请选择图片。");return}
+ try{
+  for(const f of files){
+   const img=await loadImage(f);
+   records.push({file:f,canvas:toCanvas(img),reason:"等待检测"});
   }
-
-  processing = true;
-  runButton.disabled = true;
-  clearButton.disabled = true;
-  downloadButton.disabled = true;
-  outputs = [];
-  preview.replaceChildren();
-  progress(0);
-  setStatus("开始处理……");
-
-  try {
-    for (let i = 0; i < files.length; i++) {
-      try {
-        await processOne(files[i], i, files.length);
-      } catch (error) {
-        log(`处理失败：${files[i].name}\n${error.stack || error.message || error}`);
-      }
-
-      progress((i + 1) / files.length * 100);
-      await sleepFrame();
-    }
-
-    log("\n全部处理结束。");
-    log(`输出文件总数：${outputs.length}`);
-  } catch (error) {
-    log("\n处理过程中发生错误：" + (error.stack || error.message || error));
-  } finally {
-    processing = false;
-    runButton.disabled = false;
-    clearButton.disabled = false;
-    downloadButton.disabled = outputs.length === 0;
-  }
-}
-
-async function downloadAll() {
-  if (!outputs.length) return;
-
-  if (!window.JSZip) {
-    setStatus(statusBox.textContent + "\n正在加载 ZIP 打包组件……");
-
-    try {
-      await new Promise((resolve, reject) => {
-        const script = document.createElement("script");
-        script.src =
-          "https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js";
-        script.onload = resolve;
-        script.onerror = () => reject(new Error("JSZip 加载失败"));
-        document.head.appendChild(script);
-      });
-    } catch (error) {
-      log(error.message);
-      log("你仍可以在结果预览中查看图片；请检查网络后再试下载 ZIP。");
-      return;
-    }
-  }
-
-  const zip = new JSZip();
-  for (const item of outputs) {
-    zip.file(item.name, item.blob);
-  }
-
-  downloadButton.disabled = true;
-  try {
-    log("正在打包 ZIP……");
-    const blob = await zip.generateAsync(
-      { type: "blob" },
-      metadata => progress(metadata.percent)
-    );
-
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "漫画图片处理结果.zip";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-
-    setTimeout(() => URL.revokeObjectURL(url), 30000);
-    log("ZIP 已生成。");
-  } catch (error) {
-    log("ZIP 打包失败：" + (error.message || error));
-  } finally {
-    downloadButton.disabled = outputs.length === 0;
-  }
-}
-
-function clearAll() {
-  if (processing) return;
-
-  outputs = [];
-  preview.replaceChildren();
-  fileInput.value = "";
-  progress(0);
-  setStatus("已清空。请选择图片，然后点击“开始处理”。");
-  downloadButton.disabled = true;
-}
-
-runButton.addEventListener("click", run);
-clearButton.addEventListener("click", clearAll);
-downloadButton.addEventListener("click", downloadAll);
-
+  renderOriginals();status("读取完成："+records.length+" 张图片。");
+ }catch(e){status("读取失败："+e.message)}
+});
+$("run").addEventListener("click",process);
+$("clear").addEventListener("click",()=>{
+ if(busy)return;
+ records=[];outputs=[];$("files").value="";
+ $("originals").replaceChildren();$("preview").replaceChildren();$("download").disabled=true;
+ status("已清空。");
+});
+$("download").addEventListener("click",async()=>{
+ if(!outputs.length)return;
+ $("download").disabled=true;
+ for(let i=0;i<outputs.length;i++){
+  download(outputs[i]);await new Promise(r=>setTimeout(r,250));
+ }
+ status("已发起 "+outputs.length+" 张 PNG 下载。如浏览器拦截，请允许多文件下载。");
+ $("download").disabled=false;
+});
 })();
 </script>
 </body>
