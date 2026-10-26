@@ -356,28 +356,82 @@ function analyzePanels(src){
 }
 
 function shouldSplitByPanels(src,analysis){
+
+function shouldSplitByPanels(src,analysis){
  const {cuts,segments}=analysis;
- if(cuts.length<2)return {split:false,reason:"有效横向边界不足 2 条"};
- if(segments.length<3)return {split:false,reason:"上下漫画格子不足 3 格"};
 
- const valid=segments.filter(s=>s.bottom-s.top>=src.height*.14);
- if(valid.length<3)return {split:false,reason:"有效漫画格子不足 3 格"};
+ if(cuts.length<2)
+  return {split:false,reason:"有效横向边界不足 2 条"};
 
- // 目录和纯文字页一般墨迹分布较稀疏，且没有足够的实质画面内容。
- const profile=pageInkProfile(src);
- if(profile.density<.035&&profile.activeRatio<.48){
-  return {split:false,reason:"疑似目录或文字页，保持整页"};
+ if(segments.length<3)
+  return {split:false,reason:"上下漫画格子不足 3 格"};
+
+ const valid=segments.filter(
+  s=>s.bottom-s.top>=src.height*.14
+ );
+
+ if(valid.length<3)
+  return {split:false,reason:"有效漫画格子不足 3 格"};
+
+ // 排除分界线附近只有少量墨迹的情况。
+ // 对白框横边经常被误判为分界线：线附近虽然是白色，
+ // 但分界线上下没有足够连续的漫画画面内容。
+ const {g,w,h}=grayImage(src,300,450);
+ const rowInk=new Float32Array(h);
+
+ for(let y=0;y<h;y++){
+  let ink=0;
+  for(let x=Math.floor(w*.04);x<Math.ceil(w*.96);x++){
+   if(g[y*w+x]<175)ink++;
+  }
+  rowInk[y]=ink/(w*.92);
  }
 
- // 如果页面大部分内容集中在单个区域，避免因零散白线而误切。
- const ratios=valid.map(s=>(s.bottom-s.top)/src.height);
- if(Math.max(...ratios)>.76){
+ const realCuts=[];
+ for(const y0 of cuts){
+  const y=Math.round(y0*h/src.height);
+  const radius=Math.max(3,Math.round(h*.035));
+  let above=0,below=0;
+  for(let yy=Math.max(0,y-radius);yy<y;yy++)above+=rowInk[yy];
+  for(let yy=y+1;yy<=Math.min(h-1,y+radius);yy++)below+=rowInk[yy];
+
+  above/=Math.max(1,Math.min(h-1,y)-Math.max(0,y-radius));
+  below/=Math.max(1,Math.min(h-1,y+radius)-y);
+
+  // 分界线两侧都必须有足够的画面墨迹
+  if(above>.025&&below>.025)realCuts.push(y0);
+ }
+
+ if(realCuts.length<2)
+  return {split:false,reason:"未找到足够的真实漫画格子边界"};
+
+ // 只使用通过复核的边界重新生成分组。
+ const realSegments=[];
+ let last=0;
+ for(const y of realCuts){
+  realSegments.push({top:last,bottom:y});
+  last=y;
+ }
+ realSegments.push({top:last,bottom:src.height});
+
+ const good=realSegments.filter(
+  s=>s.bottom-s.top>=src.height*.14
+ );
+
+ if(good.length<3)
+  return {split:false,reason:"复核后漫画格子不足 3 格"};
+
+ const ratios=good.map(s=>(s.bottom-s.top)/src.height);
+ if(Math.max(...ratios)>.76)
   return {split:false,reason:"页面主要内容集中在一个大区域"};
- }
 
- // 三格以上且各段高度合理时，才允许自动分割。
- return {split:true,reason:"检测到 "+valid.length+" 个可能的上下漫画区域",segments:valid};
+ return {
+  split:true,
+  reason:"复核后检测到 "+good.length+" 个漫画区域",
+  segments:good
+};
 }
+
 
 function makeDebug(src,det,analysis){
  const c=canvas(src.width,src.height),ctx=c.getContext("2d");
