@@ -110,6 +110,12 @@ const PAGE_W=528;
 const PAGE_H=792;
 let records=[];
 let outputs=[];
+  function addOutput(canvas, name) {
+  outputs.push({
+    canvas: canvas,
+    name: name
+  });
+  }
 let busy=false;
 
 function status(s){$("status").textContent=s;}
