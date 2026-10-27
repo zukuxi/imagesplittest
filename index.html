@@ -223,16 +223,19 @@ function detectBalloons(src){
  * 相比上一版，降低对浅色扫描图的限制，并允许边界有少量墨迹中断。
  * 单条线不会直接触发分页，最终仍会检查页面内容和格子数量。
  */
+
 function detectPanelRows(src){
  const {g,w,h,scale}=grayImage(src,500,750);
  const rowWhite=new Float32Array(h);
  const rowDark=new Float32Array(h);
  const rowInk=new Float32Array(h);
  const x0=Math.floor(w*.04),x1=Math.ceil(w*.96);
+
  for(let y=0;y<h;y++){
   let white=0,dark=0,ink=0,n=0;
   for(let x=x0;x<x1;x++){
-   const v=g[y*w+x];n++;
+   const v=g[y*w+x];
+   n++;
    if(v>=220)white++;
    if(v<115)dark++;
    if(v<185)ink++;
@@ -241,45 +244,198 @@ function detectPanelRows(src){
   rowDark[y]=dark/Math.max(1,n);
   rowInk[y]=ink/Math.max(1,n);
  }
+
+ // 第一部分：保留原有的横向边界检测
  const bands=[];
  let start=-1;
+
  for(let y=Math.floor(h*.035);y<Math.ceil(h*.965);y++){
   const hit=rowWhite[y]>.78&&rowDark[y]<.09;
+
   if(hit&&start<0)start=y;
+
   if((!hit||y===h-1)&&start>=0){
    const end=hit&&y===h-1?y:y-1;
-   if(end-start+1>=Math.max(2,Math.round(h*.003)))
-    bands.push({start,end,mid:Math.round((start+end)/2)});
+
+   if(end-start+1>=Math.max(2,Math.round(h*.003))){
+    bands.push({
+     start,
+     end,
+     mid:Math.round((start+end)/2)
+    });
+   }
    start=-1;
   }
  }
+
  const merged=[];
  for(const b of bands){
   const last=merged[merged.length-1];
+
   if(last&&b.start-last.end<=Math.max(3,h*.014)){
-   last.end=b.end;last.mid=Math.round((last.start+last.end)/2);
-  }else merged.push({...b});
+   last.end=b.end;
+   last.mid=Math.round((last.start+last.end)/2);
+  }else{
+   merged.push({...b});
+  }
  }
- const boundaries=[];
+
+ const candidates=[];
+
  for(const b of merged){
   const y=b.mid;
   if(y<h*.10||y>h*.90)continue;
+
   const radius=Math.max(3,Math.round(h*.04));
-  const before=Math.max(0,y-radius),after=Math.min(h-1,y+radius);
+  const before=Math.max(0,y-radius);
+  const after=Math.min(h-1,y+radius);
+
   let above=0,below=0,aboveInk=0,belowInk=0;
-  for(let yy=before;yy<y;yy++){above+=rowDark[yy];aboveInk+=rowInk[yy]}
-  for(let yy=y+1;yy<=after;yy++){below+=rowDark[yy];belowInk+=rowInk[yy]}
+
+  for(let yy=before;yy<y;yy++){
+   above+=rowDark[yy];
+   aboveInk+=rowInk[yy];
+  }
+
+  for(let yy=y+1;yy<=after;yy++){
+   below+=rowDark[yy];
+   belowInk+=rowInk[yy];
+  }
+
   above/=Math.max(1,y-before);
   below/=Math.max(1,after-y);
   aboveInk/=Math.max(1,y-before);
   belowInk/=Math.max(1,after-y);
-  // 边界上下必须都有内容，避免把纯文字目录中的横向留白当成格子线
+
+  // 边界上下都必须有画面内容，过滤部分纯文字留白
   if(above>.009&&below>.009&&aboveInk>.015&&belowInk>.015){
-   boundaries.push({y:Math.round(y/scale),score:above+below});
+   candidates.push({
+    y:Math.round(y/scale),
+    score:above+below,
+    kind:"horizontal"
+   });
   }
  }
- return {boundaries,debug:{w,h,scale,rowWhite,rowDark,rowInk,bands:merged}};
+
+ // 第二部分：寻找轻微倾斜的漫画框边线。
+ // 将图像分成多个横向区段；一条候选线可以在中间有空档，
+ // 但必须在足够多的区段内找到方向一致的暗线。
+ const xStart=Math.floor(w*.06);
+ const xEnd=Math.ceil(w*.94);
+ const bins=28;
+ const minBins=17;
+ const slopes=[];
+
+ for(let deg=-12;deg<=12;deg+=2){
+  slopes.push(Math.tan(deg*Math.PI/180));
+ }
+
+ for(const slope of slopes){
+  const maxOffset=Math.ceil(
+   Math.abs(slope)*(xEnd-xStart)/2
+  );
+  const stepY=Math.max(3,Math.round(h*.012));
+
+  for(
+   let baseY=Math.floor(h*.12)+maxOffset;
+   baseY<Math.ceil(h*.88)-maxOffset;
+   baseY+=stepY
+  ){
+   let hitBins=0;
+   let first=-1,last=-1;
+
+   for(let bi=0;bi<bins;bi++){
+    const xa=Math.floor(
+     xStart+bi*(xEnd-xStart)/bins
+    );
+    const xb=Math.max(
+     xa+1,
+     Math.floor(xStart+(bi+1)*(xEnd-xStart)/bins)
+    );
+
+    let hit=false;
+
+    for(let x=xa;x<xb;x+=2){
+     const yy=Math.round(
+      baseY+slope*(x-(xStart+xEnd)/2)
+     );
+
+     if(yy<1||yy>=h-1)continue;
+
+     const v=g[yy*w+x];
+     const above=g[(yy-1)*w+x];
+     const below=g[(yy+1)*w+x];
+
+     // 该位置必须像一条较暗的线，而非孤立的普通墨迹
+     if(
+      v<125&&
+      v<=above+12&&
+      v<=below+12
+     ){
+      hit=true;
+      break;
+     }
+    }
+
+    if(hit){
+     hitBins++;
+     if(first<0)first=bi;
+     last=bi;
+    }
+   }
+
+   // 不要求整条线连续，但要求有较广的横向覆盖
+   if(
+    hitBins<minBins||
+    first<0||
+    last-first<bins*.58
+   )continue;
+
+   const coverage=hitBins/bins;
+   const yCenter=Math.round(baseY/scale);
+
+   // 避免与已有横向候选线重复
+   if(candidates.some(
+    c=>Math.abs(c.y-yCenter)<src.height*.035
+   ))continue;
+
+   candidates.push({
+    y:yCenter,
+    score:coverage,
+    kind:"slanted",
+    slope
+   });
+  }
+ }
+
+ // 第三部分：合并相近候选线，避免重复计算
+ candidates.sort((a,b)=>a.y-b.y);
+ const boundaries=[];
+
+ for(const c of candidates){
+  const last=boundaries[boundaries.length-1];
+
+  if(
+   last&&
+   Math.abs(c.y-last.y)<src.height*.035
+  ){
+   if(c.score>last.score){
+    Object.assign(last,c);
+   }
+  }else{
+   boundaries.push({...c});
+  }
+ }
+
+ return {
+  boundaries,
+  debug:{
+   w,h,scale,
+   rowWhite,rowDark,rowInk,
+   bands:merged
+  }
 }
+
 
 function detectGutter(src){
  if(src.width/src.height<1.25)return null;
