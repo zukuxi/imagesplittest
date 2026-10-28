@@ -268,198 +268,234 @@ function detectGutter(src){
  * 因此要求候选线足够长、暗线证据足够强。
  */
 
+/*
+ * 黑色画框边界检测（修正版）
+ *
+ * 1. 单根黑线可以独立成为候选边界，不强制要求双线配对。
+ * 2. 双黑线之间的白色间隙只作为辅助证据，不作为必需条件。
+ * 3. 检测水平线和倾斜线。
+ * 4. 尽量排除气泡轮廓、短线和文字造成的误判。
+ * 5. 相邻候选只合并非常接近的重复检测，避免漏掉不同画格的边界。
+ */
 function detectBorders(src){
-  const {g,w,h,scale}=grayImage(src,520,780);
-  const sensitivity=$("sensitivity").value;
+ const {g,w,h,scale}=grayImage(src,520,780);
+ const sensitivity=$("sensitivity").value;
 
-  const darkLimit=sensitivity==="strict"?82:
-                  sensitivity==="sensitive"?125:105;
-  const minCoverage=sensitivity==="strict"?.76:
-                    sensitivity==="sensitive"?.56:.66;
+ const darkLimit=sensitivity==="strict"?82:
+                 sensitivity==="sensitive"?135:110;
 
-  const x0=Math.floor(w*.045);
-  const x1=Math.ceil(w*.955);
-  const width=x1-x0;
-  const lineCandidates=[];
+ const minCoverage=sensitivity==="strict"?.70:
+                   sensitivity==="sensitive"?.48:.58;
 
-  // 扫描水平线及斜线，允许边线被少量内容遮挡。
-  function scanSlope(degrees){
-    const slope=Math.tan(degrees*Math.PI/180);
-    const bins=32;
-    const binWidth=width/bins;
-    const minY=Math.floor(h*.07);
-    const maxY=Math.ceil(h*.93);
+ const x0=Math.floor(w*.035);
+ const x1=Math.ceil(w*.965);
+ const width=x1-x0;
 
-    // 扫描间距调小，尽量不漏掉窄边线。
-    const step=Math.max(1,Math.round(h*.002));
+ const lineCandidates=[];
 
-    for(let base=minY;base<maxY;base+=step){
-      let hitBins=0,first=-1,last=-1;
+ /*
+  * 扫描不同角度的黑线。
+  * 每条候选线分成多个区段，允许局部被文字或图案遮挡。
+  */
+ function scanSlope(degrees){
+  const slope=Math.tan(degrees*Math.PI/180);
+  const bins=40;
+  const binWidth=width/bins;
+  const minY=Math.floor(h*.06);
+  const maxY=Math.ceil(h*.94);
 
-      for(let bi=0;bi<bins;bi++){
-        const xa=Math.floor(x0+bi*binWidth);
-        const xb=Math.min(x1,Math.floor(x0+(bi+1)*binWidth));
-        let localHits=0,localN=0;
+  // 更密集地扫描，减少细线漏检
+  const step=Math.max(1,Math.round(h*.0025));
 
-        for(let x=xa;x<xb;x+=2){
-          const y=Math.round(base+slope*(x-(x0+x1)/2));
-          if(y<1||y>=h-1)continue;
+  for(let base=minY;base<maxY;base+=step){
+   let hitBins=0;
+   let first=-1;
+   let last=-1;
+   let totalHits=0;
+   let totalSamples=0;
 
-          localN++;
-          const v=g[y*w+x];
+   for(let bi=0;bi<bins;bi++){
+    const xa=Math.floor(x0+bi*binWidth);
+    const xb=Math.min(x1,Math.floor(x0+(bi+1)*binWidth));
 
-          // 必须有真实暗线证据，不能只凭白色区域判断。
-          if(v<darkLimit &&
-             v<=g[(y-1)*w+x]+18 &&
-             v<=g[(y+1)*w+x]+18){
-            localHits++;
-          }
-        }
+    let localHits=0;
+    let localN=0;
 
-        if(localN&&localHits/Math.max(1,localN)>.48){
-          hitBins++;
-          if(first<0)first=bi;
-          last=bi;
-        }
-      }
+    for(let x=xa;x<xb;x+=2){
+     const y=Math.round(base+slope*(x-(x0+x1)/2));
 
-      const coverage=hitBins/bins;
-      const lengthRatio=(last-first+1)/bins;
+     if(y<1||y>=h-1)continue;
 
-      if(coverage>=minCoverage&&lengthRatio>=.56){
-        lineCandidates.push({
-          base,
-          degrees,
-          slope,
-          coverage,
-          lengthRatio,
-          score:coverage*.7+lengthRatio*.3
-        });
-      }
-    }
-  }
+     localN++;
 
-  // 检测横线和不同角度的斜线。
-  for(let deg=-30;deg<=30;deg+=3){
-    scanSlope(deg);
-  }
+     const v=g[y*w+x];
+     const above=g[(y-1)*w+x];
+     const below=g[(y+1)*w+x];
 
-  // 合并同一根粗线产生的近邻重复结果。
-  // 间距比旧版小，避免把两根黑线合并成一根。
-  lineCandidates.sort((a,b)=>b.score-a.score);
-  const unique=[];
-
-  for(const c of lineCandidates){
-    const duplicate=unique.some(u=>
-      Math.abs(u.base-c.base)<h*.003&&
-      Math.abs(u.degrees-c.degrees)<5
-    );
-
-    if(!duplicate)unique.push(c);
-  }
-
-  const horizontal=unique
-    .filter(c=>Math.abs(c.degrees)<=6)
-    .sort((a,b)=>a.base-b.base);
-
-  const boundaries=[];
-  const pairedIndexes=new Set();
-
-  /*
-   * 检查两根黑线之间的区域是否主要为白色。
-   * 白色区域只用来验证两根线，绝不单独作为切割线。
-   */
-  function gapLooksWhite(y1,y2){
-    const top=Math.max(0,Math.ceil(Math.min(y1,y2)+1));
-    const bottom=Math.min(h-1,Math.floor(Math.max(y1,y2)-1));
-
-    if(bottom<top)return false;
-
-    let bright=0,total=0;
-    const xa=Math.floor(w*.07);
-    const xb=Math.ceil(w*.93);
-
-    for(let y=top;y<=bottom;y++){
-      for(let x=xa;x<xb;x+=3){
-        total++;
-        if(g[y*w+x]>190)bright++;
-      }
+     /*
+      * 黑线判断：
+      * 允许线条周围不是纯白色，避免扫描灰度漫画时漏检。
+      */
+     if(v<darkLimit &&
+        v<=above+24 &&
+        v<=below+24){
+      localHits++;
+     }
     }
 
-    return total>0&&bright/total>=.68;
-  }
+    totalHits+=localHits;
+    totalSamples+=localN;
 
-  /*
-   * 双黑线配对：
-   * 1. 两根线距离不能过大；
-   * 2. 角度必须接近；
-   * 3. 中间必须存在明显的白色间隔；
-   * 4. 两根线本身都必须有足够的长度和暗线证据。
-   */
-  for(let i=0;i<horizontal.length;i++){
-    const lineA=horizontal[i];
-
-    if(pairedIndexes.has(i))continue;
-    if(lineA.base<h*.10||lineA.base>h*.90)continue;
-
-    for(let j=i+1;j<horizontal.length;j++){
-      const lineB=horizontal[j];
-      const gap=lineB.base-lineA.base;
-
-      // 超出合理的边框间隔就不再继续寻找配对。
-      if(gap>h*.025)break;
-      if(pairedIndexes.has(j))continue;
-      if(gap<h*.003)continue;
-
-      if(Math.abs(lineA.degrees-lineB.degrees)>4)continue;
-      if(Math.min(lineA.coverage,lineB.coverage)<minCoverage)continue;
-      if(!gapLooksWhite(lineA.base,lineB.base))continue;
-
-      // 切割位置取两根黑线之间的中点。
-      boundaries.push({
-        y:(lineA.base+lineB.base)/2,
-        score:(lineA.score+lineB.score)/2,
-        coverage:Math.min(lineA.coverage,lineB.coverage),
-        kind:"双黑线＋白色间隔"
-      });
-
-      pairedIndexes.add(i);
-      pairedIndexes.add(j);
-      break;
+    if(localN&&localHits/Math.max(1,localN)>.38){
+     hitBins++;
+     if(first<0)first=bi;
+     last=bi;
     }
+   }
+
+   const coverage=hitBins/bins;
+   const lengthRatio=first<0?0:(last-first+1)/bins;
+
+   /*
+    * 单根线独立判断。
+    * 不再要求必须找到第二根平行黑线。
+    */
+   if(coverage>=minCoverage&&lengthRatio>=.55){
+    lineCandidates.push({
+     base,
+     degrees,
+     slope,
+     coverage,
+     lengthRatio,
+     score:coverage*.65+lengthRatio*.35
+    });
+   }
+  }
+ }
+
+ // 先检查水平及接近水平的线，再检查倾斜线
+ for(let deg=-30;deg<=30;deg+=3){
+  scanSlope(deg);
+ }
+
+ /*
+  * 合并同一根线反复扫描产生的重复结果。
+  * 这里使用较小的距离，避免把相邻画框线合并掉。
+  */
+ lineCandidates.sort((a,b)=>b.score-a.score);
+
+ const unique=[];
+
+ for(const c of lineCandidates){
+  const duplicate=unique.some(u=>
+   Math.abs(u.base-c.base)<h*.006&&
+   Math.abs(u.degrees-c.degrees)<4
+  );
+
+  if(!duplicate)unique.push(c);
+ }
+
+ /*
+  * 对双黑线进行辅助判断：
+  * 如果两条接近水平的暗线之间存在明显亮带，
+  * 则提高这两条线的可信度。
+  *
+  * 注意：即使找不到配对线，单根线仍然保留。
+  */
+ const horizontal=unique.filter(c=>Math.abs(c.degrees)<=9);
+
+ function brightGapBetween(a,b){
+  const y1=Math.round(Math.min(a.base,b.base));
+  const y2=Math.round(Math.max(a.base,b.base));
+
+  if(y2-y1<2)return false;
+
+  let bright=0;
+  let total=0;
+
+  const xa=Math.floor(x0+width*.08);
+  const xb=Math.ceil(x1-width*.08);
+
+  for(let y=y1+1;y<y2;y+=2){
+   for(let x=xa;x<xb;x+=3){
+    total++;
+    if(g[y*w+x]>190)bright++;
+   }
   }
 
-  // 同一个边框如果被重复配对，只保留一条切割位置。
-  boundaries.sort((a,b)=>a.y-b.y);
+  return total>0&&bright/total>.58;
+ }
 
-  for(let i=boundaries.length-1;i>0;i--){
-    if(Math.abs(boundaries[i].y-boundaries[i-1].y)<h*.025){
-      if(boundaries[i].score>boundaries[i-1].score){
-        boundaries.splice(i-1,1);
-      }else{
-        boundaries.splice(i,1);
-      }
-    }
+ for(let i=0;i<horizontal.length;i++){
+  const a=horizontal[i];
+
+  for(let j=i+1;j<horizontal.length;j++){
+   const b=horizontal[j];
+   const distance=Math.abs(a.base-b.base);
+
+   if(distance>h*.025)break;
+   if(distance<h*.002)continue;
+
+   if(Math.abs(a.degrees-b.degrees)>4)continue;
+
+   if(brightGapBetween(a,b)){
+    a.score=Math.min(1,a.score+.10);
+    b.score=Math.min(1,b.score+.10);
+   }
   }
+ }
 
-  return {
-    w,h,scale,
-    boundaries:boundaries.map(c=>({
-      ...c,
-      y:Math.round(c.y/scale)
-    })),
+ /*
+  * 生成横向切割候选。
+  * 只合并距离很近的重复检测。
+  * 不会因为附近还有另一根线，就丢弃当前线。
+  */
+ horizontal.sort((a,b)=>a.base-b.base);
 
-    // 斜线仅保留为调试信息，不直接当成水平切割坐标。
-    slanted:unique
-      .filter(c=>Math.abs(c.degrees)>6)
-      .map(c=>({
-        y:Math.round(c.base/scale),
-        degrees:c.degrees,
-        coverage:c.coverage,
-        score:c.score
-      }))
-  };
+ const boundaries=[];
+
+ for(const c of horizontal){
+  if(c.base<h*.07||c.base>h*.93)continue;
+
+  const y=Math.round(c.base/scale);
+  const prev=boundaries[boundaries.length-1];
+
+  if(prev&&Math.abs(prev.y-y)<h/scale*.006){
+   if(c.score>prev.score){
+    prev.y=y;
+    prev.score=c.score;
+    prev.coverage=c.coverage;
+   }
+  }else{
+   boundaries.push({
+    y,
+    score:c.score,
+    coverage:c.coverage,
+    kind:"黑色横向边界"
+   });
+  }
+ }
+
+ /*
+  * 斜线保留给调试图显示。
+  * 不把斜线的中点直接当作水平切割位置。
+  */
+ const slanted=unique
+  .filter(c=>Math.abs(c.degrees)>9)
+  .map(c=>({
+   y:Math.round(c.base/scale),
+   degrees:c.degrees,
+   coverage:c.coverage,
+   score:c.score
+  }));
+
+ return {
+  w,h,scale,
+  boundaries,
+  slanted
+ };
 }
+    
 
 
 
