@@ -7,10 +7,11 @@
 *{box-sizing:border-box}body{font:15px system-ui,sans-serif;background:#f3f4f6;color:#222;margin:0;padding:14px}main{max-width:1000px;margin:auto}.card{background:#fff;border-radius:12px;padding:14px;margin:12px 0}h1{font-size:22px}h3{font-size:17px}p{line-height:1.65;color:#555}label{display:block;margin:11px 0}button{padding:10px 14px;background:#1769aa;color:white;border:0;border-radius:8px;margin:4px}button:disabled{opacity:.45}.secondary{background:#555}input,select{font:inherit}input[type=number]{width:90px}#status{white-space:pre-wrap;line-height:1.7}#originals,#preview{display:grid;grid-template-columns:repeat(auto-fill,minmax(145px,1fr));gap:10px}.item{background:#eee;padding:8px;border-radius:8px;min-width:0}.item img{width:100%;height:auto;display:block}.item div{font-size:12px;overflow-wrap:anywhere;white-space:pre-wrap;margin:6px 0}
 </style></head><body><main>
 <h1>X3 日漫分割工具</h1>
-<p>不再识别漫画格子：先裁白边，再选择整页、分 2 份或分 3 份。分割允许重叠；宽幅双页会先尝试识别中缝，按日漫顺序先输出右页再输出左页。输出尺寸 528×792。</p>
+<p>不再识别漫画格子：单页可选择整页、分 2 份或分 3 份。另可开启“整本双页扫描”，先从中缝分左右页，再分别按单页设置处理；老书阴影中缝会尝试检测，找不到时以中心线为后备。双页按日漫顺序先输出右页再输出左页。彩页整页保留。输出尺寸 528×792。</p>
 <section class="card"><h3>1. 选择图片</h3><input id="files" type="file" accept="image/*" multiple></section>
 <section class="card"><h3>2. 设置</h3>
-<label>页面处理方式 <select id="parts"><option value="0">不切分</option><option value="2">分成 2 份</option><option value="3" selected>分成 3 份</option><option value="spread">整本双页（按中间阴影线分左右页）</option></select></label>
+<label>单页处理方式 <select id="parts"><option value="0">不切分</option><option value="2">分成 2 份</option><option value="3" selected>分成 3 份</option></select></label>
+<label><input id="doublePage" type="checkbox"> 整本双页扫描（先从中缝分成左右页，再按上面的设置处理每一页）</label>
 <label>分割重叠像素 <input id="overlap" type="number" min="0" max="300" value="48"> <small>数值越大，相邻取景重复内容越多</small></label>
 <label>白边裁切 <select id="trim"><option value="normal">普通</option><option value="strong" selected>积极（推荐，尽量裁掉边缘水印）</option></select></label>
 <button id="run">开始处理</button><button id="clear" class="secondary">清空</button></section>
@@ -32,23 +33,11 @@ function gray(s,maxW=420,maxH=640){let scale=Math.min(1,maxW/s.width,maxH/s.heig
 function colorPage(s){let c=canvas(72,96),x=c.getContext("2d",{willReadFrequently:true});x.drawImage(s,0,0,72,96);let d=x.getImageData(0,0,72,96).data,n=0,k=0;for(let i=0;i<d.length;i+=16){n++;if(Math.max(d[i],d[i+1],d[i+2])-Math.min(d[i],d[i+1],d[i+2])>38)k++}return k/n>.10}
 function trimWhite(s){let mode=$("trim").value;let{g,w,h,scale}=gray(s,700,950);let th=mode==="strong"?247:251;let lim=mode==="strong"?.28:.20;function row(y){let n=0,k=0;for(let x=0;x<w;x+=2){n++;if(g[y*w+x]>=th)k++}return k/Math.max(1,n)}function col(x){let n=0,k=0;for(let y=0;y<h;y+=2){n++;if(g[y*w+x]>=th)k++}return k/Math.max(1,n)}let t=0,b=h-1,l=0,r=w-1;while(t<h*lim&&row(t)>(mode==="strong"?.84:.92))t++;while(b>h-1-h*lim&&row(b)>(mode==="strong"?.84:.92))b--;while(l<w*lim&&col(l)>(mode==="strong"?.84:.92))l++;while(r>w-1-w*lim&&col(r)>(mode==="strong"?.84:.92))r--;if(r-l<w*.35||b-t<h*.35)return s;let out=crop(s,l/scale,t/scale,(r-l+1)/scale,(b-t+1)/scale);if(mode==="strong"){let mx=Math.round(out.width*.008),my=Math.round(out.height*.008);if(out.width-2*mx>out.width*.85&&out.height-2*my>out.height*.85)out=crop(out,mx,my,out.width-2*mx,out.height-2*my)}return out}
 function detectSpreadGutter(s){if(s.width/s.height<1.25)return null;let{g,w,h,scale}=gray(s,600,780),lo=Math.floor(w*.36),hi=Math.ceil(w*.64),best=-1,bestScore=0;for(let x=lo;x<hi;x++){let white=0,n=0;for(let y=Math.floor(h*.08);y<h*.92;y+=2){n++;if(g[y*w+x]>218)white++}let q=white/n;if(q>bestScore){bestScore=q;best=x}}if(best<0||bestScore<.68)return null;let mid=Math.floor(h/2),l=best,r=best;while(l>lo&&g[mid*w+l-1]>205)l--;while(r<hi-1&&g[mid*w+r+1]>205)r++;if(r-l>w*.07)return null;function ink(a,b){let k=0,n=0;for(let y=Math.floor(h*.12);y<h*.88;y+=3)for(let x=Math.max(0,a);x<Math.min(w,b);x+=3){n++;if(g[y*w+x]<180)k++}return k/Math.max(1,n)}if(ink(best-w*.045,best-w*.012)<.012||ink(best+w*.012,best+w*.045)<.012)return null;return Math.round(best/scale)}
-function detectShadowCenter(s){
- // 老书扫描中缝可能是灰黑阴影而非白色空隙；比较中间各列与左右邻近区域的亮度。
- if(s.width/s.height<1.18)return null;
- let{g,w,h,scale}=gray(s,720,900),y0=Math.floor(h*.07),y1=Math.ceil(h*.93),lo=Math.floor(w*.40),hi=Math.ceil(w*.60);
- function avg(x0,x1){let sum=0,n=0;for(let y=y0;y<y1;y+=2)for(let x=Math.max(0,x0);x<Math.min(w,x1);x+=2){sum+=g[y*w+x];n++}return sum/Math.max(1,n)}
- let best=-1,bestScore=-Infinity,bestDark=255;
- for(let x=lo;x<hi;x++){
-   let center=avg(x-1,x+2),left=avg(x-Math.max(5,Math.round(w*.035)),x-Math.max(2,Math.round(w*.012))),right=avg(x+Math.max(2,Math.round(w*.012)),x+Math.max(5,Math.round(w*.035)));
-   let sides=(left+right)/2,contrast=sides-center;
-   // 阴影线要比两侧明显更暗；同时轻微偏好较窄、接近中心的线。
-   let score=contrast-Math.abs(x-w/2)/w*5;
-   if(contrast>2.5&&score>bestScore){bestScore=score;best=x;bestDark=center}
- }
- if(best<0)return null;
- // 允许浅灰阴影；排除单纯整页偏暗或无明显中缝的页面。
- let left=avg(best-Math.round(w*.08),best-Math.round(w*.035)),right=avg(best+Math.round(w*.035),best+Math.round(w*.08));
- if((left+right)/2-bestDark<4)return null;
+function detectSpineCut(s){
+ // 老书可能没有白色中缝，改找中央区域持续存在的暗色阴影；找不到时回退到正中间。
+ let {g,w,h,scale}=gray(s,700,900),lo=Math.floor(w*.40),hi=Math.ceil(w*.60),best=Math.floor(w/2),bestScore=Infinity;
+ function meanCol(x){let sum=0,n=0;for(let y=Math.floor(h*.06);y<h*.94;y+=2){sum+=g[y*w+x];n++}return sum/Math.max(1,n)}
+ for(let x=lo;x<hi;x++){let m=meanCol(x),near=(meanCol(Math.max(0,x-Math.max(2,Math.round(w*.025))))+meanCol(Math.min(w-1,x+Math.max(2,Math.round(w*.025)))))/2;let darkness=m-near;let centralPenalty=Math.abs(x-w/2)/w*.08;let score=-(darkness)+centralPenalty*100;if(score<bestScore){bestScore=score;best=x}}
  return Math.round(best/scale);
 }
 function makeDebug(src,cuts){return src}
@@ -60,19 +49,11 @@ function views(s,count,overlap){let baseH=Math.max(1,Math.round(s.width*2/3)),ex
  return tops.map((t,i)=>({canvas:makePage(rotate90(crop(s,0,t,s.width,Math.min(vh,s.height-t)))),index:i+1}))}
 function download(o){let a=document.createElement("a");a.href=o.canvas.toDataURL("image/png");a.download=o.name;document.body.append(a);a.click();a.remove()}
 function render(){let root=$("originals");root.replaceChildren();records.forEach((r,i)=>{let d=document.createElement("div");d.className="item";let im=document.createElement("img");im.src=(r.debug||r.canvas).toDataURL("image/jpeg",.85);let t=document.createElement("div");t.textContent=(i+1)+". "+r.file.name+"\n"+(r.reason||"等待处理");d.append(im,t);root.append(d)});root=$("preview");root.replaceChildren();outputs.forEach((o,i)=>{let d=document.createElement("div");d.className="item";let im=document.createElement("img");im.src=o.canvas.toDataURL("image/png");let t=document.createElement("div");t.textContent=(i+1)+". "+o.name;let b=document.createElement("button");b.className="secondary";b.textContent="下载此页";b.onclick=()=>download(o);d.append(im,t,b);root.append(d)});$("downloadAll").disabled=!outputs.length}
-async function process(){if(busy||!records.length)return;busy=true;$("run").disabled=true;outputs=[];try{let mode=$("parts").value,overlap=Number($("overlap").value)||0;for(let i=0;i<records.length;i++){let r=records[i],col=colorPage(r.canvas),base=col?r.canvas:trimWhite(r.canvas),gut=null,pages=[],notes=[];r.debug=null;
- if(col){pages=[{src:base,suffix:"_color",portrait:true}];}
- else if(mode==="spread"){
-   // 整本双页模式：优先找阴影中缝，找不到时使用页面中心线作为保底。
-   gut=detectShadowCenter(base);if(gut===null)gut=Math.round(base.width/2);
-   pages=[{src:trimWhite(crop(base,gut,0,base.width-gut,base.height)),suffix:"_R"},{src:trimWhite(crop(base,0,0,gut,base.height)),suffix:"_L"}];
- }else{
-   gut=detectSpreadGutter(base);
-   pages=gut!==null?[{src:trimWhite(crop(base,gut,0,base.width-gut,base.height)),suffix:"_R"},{src:trimWhite(crop(base,0,0,gut,base.height)),suffix:"_L"}]:[{src:base,suffix:""}];
- }
- for(let p of pages){let s=p.src,nm=name(r.file.name)+p.suffix;if(p.portrait){add(makePage(s),nm+"_portrait.png");notes.push("彩页整页保留（不裁白边、不分割）");continue}if(mode===0||mode==="0"){add(makePage(s),nm+"_portrait.png");notes.push("按设置保留整页");continue}if(mode==="spread"){add(makePage(s),nm+"_portrait.png");notes.push("整本双页模式：按中缝切成左右页");continue}let v=views(s,Number(mode),overlap);v.forEach((q,j)=>add(q.canvas,nm+"_view_"+String(j+1).padStart(2,"0")+".png"));notes.push("固定分成 "+v.length+" 份，重叠 "+Math.min(300,Math.max(0,overlap))+"px；内部裁切线已尝试避开墨线")}
- r.reason=(col?"彩页；":gut!==null?"检测到/指定双页中缝，右页优先；":"")+notes.join("；");render();$("status").textContent="处理 "+(i+1)+"/"+records.length+"："+r.file.name+"\n"+r.reason+"\n累计输出 "+outputs.length+" 页";await new Promise(res=>setTimeout(res,0))}
- $("status").textContent="处理完成。\n输入图片："+records.length+" 张\n输出 PNG："+outputs.length+" 张\n尺寸：528×792\n已关闭画格识别。可选固定分割，或使用整本双页模式按中间阴影线切分；双页按右页优先输出。"}catch(e){console.error(e);$("status").textContent="处理失败："+e.message}finally{busy=false;$("run").disabled=false}}
+async function process(){if(busy||!records.length)return;busy=true;$("run").disabled=true;outputs=[];try{let mode=Number($("parts").value),overlap=Number($("overlap").value)||0,forceSpread=$("doublePage").checked;for(let i=0;i<records.length;i++){let r=records[i],col=colorPage(r.canvas),base=col?r.canvas:trimWhite(r.canvas),gut=null,pages,notes=[];r.debug=null;
+ if(col){pages=[{src:r.canvas,suffix:"_color",portrait:true}]}else if(forceSpread){gut=detectSpreadGutter(base);if(gut===null)gut=detectSpineCut(base);pages=[{src:trimWhite(crop(base,gut,0,base.width-gut,base.height)),suffix:"_R"},{src:trimWhite(crop(base,0,0,gut,base.height)),suffix:"_L"}]}else{gut=detectSpreadGutter(base);pages=gut!==null?[{src:trimWhite(crop(base,gut,0,base.width-gut,base.height)),suffix:"_R"},{src:trimWhite(crop(base,0,0,gut,base.height)),suffix:"_L"}]:[{src:base,suffix:""}]}
+ for(let p of pages){let s=p.src,nm=name(r.file.name)+p.suffix;if(p.portrait){add(makePage(s),nm+"_portrait.png");notes.push("彩页整页保留（不裁白边、不分割）");continue}if(mode===0){add(makePage(s),nm+"_portrait.png");notes.push("整页保留");continue}let v=views(s,mode,overlap);v.forEach((q,j)=>add(q.canvas,nm+"_view_"+String(j+1).padStart(2,"0")+".png"));notes.push("固定分成 "+v.length+" 份，重叠 "+Math.min(300,Math.max(0,overlap))+"px")}
+ r.reason=(col?"彩页；":forceSpread?"整本双页模式：按中缝分左右页，右页优先；":gut!==null?"检测到白色中缝，右页优先；":"")+notes.join("；");render();$("status").textContent="处理 "+(i+1)+"/"+records.length+"："+r.file.name+"\n"+r.reason+"\n累计输出 "+outputs.length+" 页";await new Promise(res=>setTimeout(res,0))}
+ $("status").textContent="处理完成。\n输入图片："+records.length+" 张\n输出 PNG："+outputs.length+" 张\n尺寸：528×792\n整本双页模式可先分左右页，再按单页设置不切、分 2 份或分 3 份。"}catch(e){console.error(e);$("status").textContent="处理失败："+e.message}finally{busy=false;$("run").disabled=false}}
 $("files").addEventListener("change",async()=>{if(busy)return;records=[];outputs=[];$("preview").replaceChildren();for(let f of Array.from($("files").files||[])){try{let im=await loadImage(f);records.push({file:f,canvas:toCanvas(im),reason:"等待处理"})}catch(e){$("status").textContent=e.message}}render();$("status").textContent="读取完成："+records.length+" 张图片。"});
 $("run").addEventListener("click",process);$("clear").addEventListener("click",()=>{if(busy)return;records=[];outputs=[];$("files").value="";render();$("status").textContent="已清空。"});
 $("downloadAll").addEventListener("click",async()=>{if(!outputs.length)return;$("downloadAll").disabled=true;for(let o of outputs){download(o);await new Promise(r=>setTimeout(r,250))}$("status").textContent="已发起 "+outputs.length+" 张 PNG 下载。如浏览器拦截，请允许多文件下载。";$("downloadAll").disabled=false});
