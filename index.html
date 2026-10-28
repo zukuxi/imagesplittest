@@ -50,7 +50,16 @@ function views(s,count,overlap){let baseH=Math.max(1,Math.round(s.width*2/3)),ex
 function download(o){let a=document.createElement("a");a.href=o.canvas.toDataURL("image/png");a.download=o.name;document.body.append(a);a.click();a.remove()}
 function render(){let root=$("originals");root.replaceChildren();records.forEach((r,i)=>{let d=document.createElement("div");d.className="item";let im=document.createElement("img");im.src=(r.debug||r.canvas).toDataURL("image/jpeg",.85);let t=document.createElement("div");t.textContent=(i+1)+". "+r.file.name+"\n"+(r.reason||"等待处理");d.append(im,t);root.append(d)});root=$("preview");root.replaceChildren();outputs.forEach((o,i)=>{let d=document.createElement("div");d.className="item";let im=document.createElement("img");im.src=o.canvas.toDataURL("image/png");let t=document.createElement("div");t.textContent=(i+1)+". "+o.name;let b=document.createElement("button");b.className="secondary";b.textContent="下载此页";b.onclick=()=>download(o);d.append(im,t,b);root.append(d)});$("downloadAll").disabled=!outputs.length}
 async function process(){if(busy||!records.length)return;busy=true;$("run").disabled=true;outputs=[];try{let mode=Number($("parts").value),overlap=Number($("overlap").value)||0,forceSpread=$("doublePage").checked;for(let i=0;i<records.length;i++){let r=records[i],col=colorPage(r.canvas),base=col?r.canvas:trimWhite(r.canvas),gut=null,pages,notes=[];r.debug=null;
- if(col){pages=[{src:r.canvas,suffix:"_color",portrait:true}]}else if(forceSpread){gut=detectSpreadGutter(base);if(gut===null)gut=detectSpineCut(base);pages=[{src:trimWhite(crop(base,gut,0,base.width-gut,base.height)),suffix:"_R"},{src:trimWhite(crop(base,0,0,gut,base.height)),suffix:"_L"}]}else{gut=detectSpreadGutter(base);pages=gut!==null?[{src:trimWhite(crop(base,gut,0,base.width-gut,base.height)),suffix:"_R"},{src:trimWhite(crop(base,0,0,gut,base.height)),suffix:"_L"}]:[{src:base,suffix:""}]}
+ if(col){pages=[{src:r.canvas,suffix:"_color",portrait:true}]}else if(forceSpread){
+   // 双页模式必须先在完整扫描图上找中缝并切左右页，再分别裁白边，避免把旁边页的边缘误判成页边。
+   const spread=r.canvas;
+   gut=detectSpreadGutter(spread);
+   if(gut===null)gut=detectSpineCut(spread);
+   pages=[
+     {src:trimWhite(crop(spread,gut,0,spread.width-gut,spread.height)),suffix:"_R"},
+     {src:trimWhite(crop(spread,0,0,gut,spread.height)),suffix:"_L"}
+   ];
+ }else{gut=detectSpreadGutter(base);pages=gut!==null?[{src:trimWhite(crop(base,gut,0,base.width-gut,base.height)),suffix:"_R"},{src:trimWhite(crop(base,0,0,gut,base.height)),suffix:"_L"}]:[{src:base,suffix:""}]}
  for(let p of pages){let s=p.src,nm=name(r.file.name)+p.suffix;if(p.portrait){add(makePage(s),nm+"_portrait.png");notes.push("彩页整页保留（不裁白边、不分割）");continue}if(mode===0){add(makePage(s),nm+"_portrait.png");notes.push("整页保留");continue}let v=views(s,mode,overlap);v.forEach((q,j)=>add(q.canvas,nm+"_view_"+String(j+1).padStart(2,"0")+".png"));notes.push("固定分成 "+v.length+" 份，重叠 "+Math.min(300,Math.max(0,overlap))+"px")}
  r.reason=(col?"彩页；":forceSpread?"整本双页模式：按中缝分左右页，右页优先；":gut!==null?"检测到白色中缝，右页优先；":"")+notes.join("；");render();$("status").textContent="处理 "+(i+1)+"/"+records.length+"："+r.file.name+"\n"+r.reason+"\n累计输出 "+outputs.length+" 页";await new Promise(res=>setTimeout(res,0))}
  $("status").textContent="处理完成。\n输入图片："+records.length+" 张\n输出 PNG："+outputs.length+" 张\n尺寸：528×792\n整本双页模式可先分左右页，再按单页设置不切、分 2 份或分 3 份。"}catch(e){console.error(e);$("status").textContent="处理失败："+e.message}finally{busy=false;$("run").disabled=false}}
