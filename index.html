@@ -43,9 +43,9 @@ function maskPage(src){let o=gray(src,440,660),{g,w,h,scale}=o,tone=paperTone(g)
  return{...o,mask,tone,cut}}
 /* XY-cut style: find full-width horizontal runs of near-background pixels. */
 function xyGutters(m){let{g,w,h,scale,tone}=m,strategy=$("strategy").value;
- let paper=Math.max(190,tone-(strategy==="sensitive"?12:strategy==="balanced"?8:5));
- let minWhite=strategy==="sensitive"?.70:strategy==="balanced"?.80:.88;
- let minRun=strategy==="sensitive"?.64:strategy==="balanced"?.73:.82;
+ let paper=Math.max(185,tone-(strategy==="sensitive"?18:strategy==="balanced"?12:8));
+ let minWhite=strategy==="sensitive"?.68:strategy==="balanced"?.76:.82;
+ let minRun=strategy==="sensitive"?.60:strategy==="balanced"?.68:.75;
  let rows=[];
  for(let y=Math.floor(h*.06);y<h*.94;y++){let white=0,run=0,best=0,ink=0;for(let x=Math.floor(w*.025);x<w*.975;x++){let v=g[y*w+x];if(v>=paper){white++;run++;if(run>best)best=run}else{run=0;if(v<m.cut)ink++}}
  let n=w*.95;if(white/n>=minWhite&&best/n>=minRun&&ink/n<.12)rows.push(y)}
@@ -68,7 +68,7 @@ function hybridCuts(src){let m=maskPage(src),xy=xyGutters(m),cc=components(m),{w
  let kept=[];for(let c of xy){let y=Math.round(c.y*scale);let cross=cc.filter(b=>b.y<y&&b.y+b.h>y&&b.w>w*.18&&b.h>h*.025);let inkUp=0,inkDown=0,n=0;for(let yy=Math.max(0,y-Math.floor(h*.08));yy<y;yy+=3)for(let x=Math.floor(w*.05);x<w*.95;x+=4){n++;if(m.mask[yy*w+x])inkUp++}let nu=0;for(let yy=y;yy<Math.min(h,y+Math.floor(h*.08));yy+=3)for(let x=Math.floor(w*.05);x<w*.95;x+=4){nu++;if(m.mask[yy*w+x])inkDown++}
  let crossingPenalty=cross.length?Math.min(.8,cross.length*.22):0;
  let score=c.score+Math.min(1,inkUp/Math.max(1,n)*8)+Math.min(1,inkDown/Math.max(1,nu)*8)-crossingPenalty;
- if(score>( $("strategy").value==="strict" ? 1.05 : $("strategy").value==="conservative" ? .8 : .48))kept.push({...c,score})}
+ if(score>( $("strategy").value==="conservative" ? .42 : $("strategy").value==="balanced" ? .34 : .24))kept.push({...c,score})}
  kept.sort((a,b)=>a.y-b.y);let out=[];for(let c of kept){let p=out[out.length-1];if(p&&c.y-p.y<src.height*.055){if(c.score>p.score)out[out.length-1]=c}else out.push(c)}
  return{cuts:out,mask:m,components:cc,xy}}
 function analyze(src){let r=hybridCuts(src),cuts=r.cuts.filter(c=>c.y>src.height*.12&&c.y<src.height*.88),good=[];for(let c of cuts){if(!good.length||c.y-good[good.length-1].y>=src.height*.10)good.push(c)}
