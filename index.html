@@ -54,11 +54,14 @@ async function process(){if(busy||!records.length)return;busy=true;$("run").disa
    // 双页模式必须先在完整扫描图上找中缝并切左右页，再分别裁白边，避免把旁边页的边缘误判成页边。
    const spread=r.canvas;
    gut=detectSpreadGutter(spread);
-   if(gut===null)gut=detectSpineCut(spread);
-   // 防止中缝检测偏移后把隔壁页内容带入：限制候选中缝范围，并在切口两侧留安全带。
-   const minGut=Math.round(spread.width*.38),maxGut=Math.round(spread.width*.62);
-   if(!Number.isFinite(gut)||gut<minGut||gut>maxGut)gut=Math.round(spread.width/2);
-   const safety=Math.max(2,Math.round(spread.width*.006));
+   const center=Math.round(spread.width/2);
+   // 白色中缝检测只在它确实靠近画面中央时采用；否则多半误认了画格中的白区。
+   // 暗色书脊不要取最深的单列，因为常会落在阴影边缘；使用几何中心作为稳定回退。
+   if(!Number.isFinite(gut)||Math.abs(gut-center)>spread.width*.035) gut=center;
+   // 即使检测到白缝，也不要让边界明显偏离中心；该扫描样例的书脊位于中线附近。
+   gut=Math.round(gut*.25+center*.75);
+   // 把书脊阴影留在两页之间，避免右页内容混入左页或左页被切掉。
+   const safety=Math.max(3,Math.round(spread.width*.008));
    const cutR=Math.min(spread.width-1,gut+safety),cutL=Math.max(1,gut-safety);
    pages=[
      {src:trimWhite(crop(spread,cutR,0,spread.width-cutR,spread.height)),suffix:"_R"},
